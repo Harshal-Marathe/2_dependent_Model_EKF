@@ -30,6 +30,8 @@ from modules.tabs.tab7_refine import render_tab7
 st.set_page_config(page_title="2 Dependent Model", page_icon="📡",
                    layout="wide", initial_sidebar_state="expanded")
 
+login()  
+
 apply_styles()
 init_session_state()
 render_sidebar(NEVERGRAD_AVAILABLE)
