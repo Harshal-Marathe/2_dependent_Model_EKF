@@ -23,7 +23,7 @@ from modules.bounds import _build_theta0_and_bounds
 from modules.optimizer import run_nevergrad_optimizer, run_nevergrad_optimizer_joint
 from modules.kalman import (
     run_kalman_filter, run_bivariate_kalman_filter, rts_smoother,
-    _precompute_adstocked, _build_observation_matrix,
+    _precompute_adstocked, _build_observation_matrix, build_static_cache,
 )
 from modules.transforms import apply_transformation, hill_transform_vec
 from modules.metrics import safe_mape
@@ -259,21 +259,29 @@ def run_full_ekf_pipeline(df_full, config, max_iter, method, ng_cfg=None):
     df_train = df_full.iloc[:n_train].copy().reset_index(drop=True)
     theta0, bounds = _build_theta0_and_bounds(df_train, g)
 
+    # The observation matrix depends only on (df, g), never on the theta
+    # being searched over — build it once per optimization run instead of
+    # on every single candidate evaluation.
+    static_cache_train = build_static_cache(df_train, g)
+
     if method == "Nevergrad" and NEVERGRAD_AVAILABLE and ng_cfg:
-        best_theta, _ = run_nevergrad_optimizer(df_train, g, theta0, bounds, ng_cfg)
+        best_theta, _ = run_nevergrad_optimizer(df_train, g, theta0, bounds, ng_cfg,
+                                                  static_cache=static_cache_train)
         opt_success = True; opt_nit = ng_cfg.get("budget", 500)
     else:
         def objective(theta):
             p = unpack_theta(theta, g)
-            _, _, _, _, _, _, _, _, loglik = run_kalman_filter(df_train, p, g)
+            _, _, _, _, _, _, _, _, loglik = run_kalman_filter(
+                df_train, p, g, static_cache=static_cache_train)
             return -loglik
         opt = minimize(objective, theta0, method=method,
                        bounds=bounds, options={"maxiter": max_iter, "ftol": 1e-9})
         best_theta = opt.x; opt_success = opt.success; opt_nit = opt.nit
 
     params = unpack_theta(best_theta, g)
+    static_cache_full = build_static_cache(df_full, g)
     yhat, residuals, x_filt, P_filt, x_pred, P_pred, Tmat, cross_beta_contrib, loglik = \
-        run_kalman_filter(df_full, params, g)
+        run_kalman_filter(df_full, params, g, static_cache=static_cache_full)
     x_smooth, P_smooth = rts_smoother(x_filt, P_filt, x_pred, P_pred, Tmat)
 
     adstocked_media = _precompute_adstocked(df_full, g, params)
@@ -386,9 +394,13 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     theta0_joint = np.concatenate([theta0_1, theta0_2, [rho0, phi1_0, phi2_0]])
     bounds_joint = list(bounds1) + list(bounds2) + [rho_bounds, phi_bounds, phi_bounds]
 
+    static_cache1_train = build_static_cache(df_train, g1)
+    static_cache2_train = build_static_cache(df_train, g2)
+
     if method == "Nevergrad" and NEVERGRAD_AVAILABLE and ng_cfg:
         best_theta_joint, _ = run_nevergrad_optimizer_joint(
-            df_train, g1, g2, theta0_joint, bounds_joint, n1, n2, ng_cfg)
+            df_train, g1, g2, theta0_joint, bounds_joint, n1, n2, ng_cfg,
+            static_cache1=static_cache1_train, static_cache2=static_cache2_train)
         opt_success = True; opt_nit = ng_cfg.get("budget", 500)
     else:
         def objective(theta_joint):
@@ -400,7 +412,9 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
             p1 = unpack_theta(theta1, g1)
             p2 = unpack_theta(theta2, g2)
             (_, _, _, _, _, _, _, _, _, loglik, _, _) = \
-                run_bivariate_kalman_filter(df_train, p1, g1, p2, g2, rho, phi1, phi2)
+                run_bivariate_kalman_filter(df_train, p1, g1, p2, g2, rho, phi1, phi2,
+                                             static_cache1=static_cache1_train,
+                                             static_cache2=static_cache2_train)
             return -loglik
         opt = minimize(objective, theta0_joint, method=method,
                         bounds=bounds_joint, options={"maxiter": max_iter, "ftol": 1e-9})
@@ -415,9 +429,12 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     params2 = unpack_theta(best_theta2, g2)
 
     # ── Run the joint filter on the FULL dataset with the fitted params ──
+    static_cache1_full = build_static_cache(df_full, g1)
+    static_cache2_full = build_static_cache(df_full, g2)
     (yhat_joint, residuals_joint, x_filt, P_filt, x_pred, P_pred, Tmat_joint,
      cross1, cross2, joint_loglik, dim1, dim2) = run_bivariate_kalman_filter(
-        df_full, params1, g1, params2, g2, best_rho, best_phi1, best_phi2)
+        df_full, params1, g1, params2, g2, best_rho, best_phi1, best_phi2,
+        static_cache1=static_cache1_full, static_cache2=static_cache2_full)
 
     # RTS smoother is dimension-agnostic — run once on the joint state
     x_smooth_joint, P_smooth_joint = rts_smoother(x_filt, P_filt, x_pred, P_pred, Tmat_joint)

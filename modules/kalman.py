@@ -286,7 +286,24 @@ def _transform_media(x: np.ndarray, transform_type: str,
 
 # ── Per-equation precompute (shared by single & joint filters) ──────────────
 
-def _prepare_equation(df, g, params):
+def build_static_cache(df, g):
+    """
+    Precomputes the pieces of one equation's state-space setup that depend
+    ONLY on (df, g) — never on the parameters being optimized — so they can
+    be built ONCE per optimization run and reused across every candidate
+    evaluation, instead of being rebuilt from scratch on every single one
+    (which is what happened before this existed: `_prepare_equation` ran
+    `_build_observation_matrix` fresh every call, even though its result
+    is 100% identical across the whole run for a fixed df/g).
+
+    Pass the result as `static_cache=` to `run_kalman_filter` /
+    `run_bivariate_kalman_filter` inside an optimization loop. Safe to
+    omit anywhere — every consumer falls back to building things fresh.
+    """
+    return {"L_mat": _build_observation_matrix(df, g, None)}
+
+
+def _prepare_equation(df, g, params, static_cache=None):
     """
     Builds every array needed to run one equation's (one dependent
     variable's) state-space recursion: observation/transition/process-noise
@@ -297,6 +314,14 @@ def _prepare_equation(df, g, params):
     called once; for the joint bivariate model it is called twice (once
     per dependent variable) and the two results are combined into the
     joint state-space system by run_bivariate_kalman_filter.
+
+    `static_cache` (optional): output of `build_static_cache(df, g)`. The
+    observation matrix (`L_mat`) depends only on `df`/`g` — never on the
+    parameters being optimized — so during optimization it's identical on
+    every single candidate evaluation. Previously it was rebuilt from
+    scratch every call; passing a static_cache lets it be built once per
+    optimization run instead. Safe to omit — falls back to building it
+    fresh, exactly as before.
     """
     TARGET_COL = g["TARGET_COL"]; MEDIA_COLS = g["MEDIA_COLS"]
     COMP_MEDIA_COLS = g["COMP_MEDIA_COLS"]; OWN_NONMEDIA_COLS = g["OWN_NONMEDIA_COLS"]
@@ -313,9 +338,22 @@ def _prepare_equation(df, g, params):
     dim = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + N_COMP_NONMEDIA + N_PRICE + N_DUMMIES + SEASONAL_DIM
 
     adstocked_media = _precompute_adstocked(df, g, params)
-    L_mat = _build_observation_matrix(df, g, adstocked_media)
+    if static_cache is not None and static_cache.get("L_mat") is not None:
+        L_mat = static_cache["L_mat"]
+    else:
+        L_mat = _build_observation_matrix(df, g, adstocked_media)
     Tmat  = _build_transition_matrix(g, params)
     Q     = _build_process_noise(df, g)
+
+    # Per-timestep raw column access, precomputed once here instead of via
+    # repeated df[col].iloc[t] / list.index() calls inside the T-step loop
+    # in _predict_step (pandas scalar indexing and repeated list lookups
+    # are both meaningfully slower than a numpy array read / dict lookup
+    # when done T times per filter run, on every optimizer candidate).
+    own_nonmedia_vals  = {c: df[c].values.astype(float) for c in OWN_NONMEDIA_COLS}
+    comp_nonmedia_vals = {c: df[c].values.astype(float) for c in COMP_NONMEDIA_COLS}
+    price_vals         = {c: df[c].values.astype(float) for c in PRICE_COLS}
+    media_idx          = {c: i for i, c in enumerate(MEDIA_COLS)}
 
     # Baseline floor: the intercept can never be reported below this
     # fraction of the target's average value — a market-mix baseline
@@ -409,6 +447,8 @@ def _prepare_equation(df, g, params):
         positive_cols=positive_cols, negative_cols=negative_cols,
         positive_state_idx=positive_state_idx, negative_state_idx=negative_state_idx,
         intercept_floor=intercept_floor,
+        own_nonmedia_vals=own_nonmedia_vals, comp_nonmedia_vals=comp_nonmedia_vals,
+        price_vals=price_vals, media_idx=media_idx,
         target_vals=df[TARGET_COL].values,
     )
 
@@ -484,7 +524,7 @@ def _predict_step(t, x_prev, df, pc):
 
     # ── Cross-media synergy ───────────────────────────────────
     for k, (tgt, src) in enumerate(CROSS_MEDIA_PAIRS):
-        tgt_idx = MEDIA_COLS.index(tgt)
+        tgt_idx = pc["media_idx"][tgt]
         contrib = params["cross_delta"][k] * pc["transformed_cross"][t, k]
         x_p[tgt_idx+1] += contrib
         cross_contrib_row[k] = contrib
@@ -492,20 +532,20 @@ def _predict_step(t, x_prev, df, pc):
     # ── Own non-media ─────────────────────────────────────────
     for k, col in enumerate(OWN_NONMEDIA_COLS):
         si = 1+N_MEDIA+N_COMP+k
-        x_p[si] += params["delta_own_nonmedia"][k] * df[col].iloc[t]
+        x_p[si] += params["delta_own_nonmedia"][k] * pc["own_nonmedia_vals"][col][t]
         if col in positive_cols:
             x_p[si] = max(x_p[si], 1e-8)
 
     # ── Competitor non-media ──────────────────────────────────
     for k, col in enumerate(COMP_NONMEDIA_COLS):
         si = 1+N_MEDIA+N_COMP+pc["N_OWN_NONMEDIA"]+k
-        x_p[si] += params["delta_comp_nonmedia"][k] * df[col].iloc[t]
+        x_p[si] += params["delta_comp_nonmedia"][k] * pc["comp_nonmedia_vals"][col][t]
         x_p[si]  = min(x_p[si], -1e-8)
 
     # ── Price ─────────────────────────────────────────────────
     for p, col in enumerate(PRICE_COLS):
         si = 1+N_MEDIA+N_COMP+pc["N_OWN_NONMEDIA"]+pc["N_COMP_NONMEDIA"]+p
-        x_p[si] += params["delta_price"][p] * df[col].iloc[t]
+        x_p[si] += params["delta_price"][p] * pc["price_vals"][col][t]
         x_p[si]  = min(x_p[si], -1e-8)
 
     # ── Intercept boost ───────────────────────────────────────
@@ -531,11 +571,15 @@ def _apply_beta_floors(x_vec, pc):
 
 # ── Main (single-equation) Kalman filter ─────────────────────────────────────
 
-def run_kalman_filter(df, params, g):
+def run_kalman_filter(df, params, g, static_cache=None):
     """Single-dependent-variable EKF (used when no second dependent
     variable is configured, and internally re-uses the same building
-    blocks as the joint bivariate filter below)."""
-    pc = _prepare_equation(df, g, params)
+    blocks as the joint bivariate filter below).
+
+    `static_cache`: optional, from `build_static_cache(df, g)` — reuses
+    the observation matrix across repeated calls instead of rebuilding it
+    every time (see build_static_cache's docstring). Safe to omit."""
+    pc = _prepare_equation(df, g, params, static_cache=static_cache)
     dim = pc["dim"]; T_len = pc["T_len"]
     L_mat = pc["L_mat"]; Tmat = pc["Tmat"]; Q = pc["Q"]
     R = params["sigma_y"] ** 2
@@ -574,7 +618,8 @@ def run_kalman_filter(df, params, g):
 
 # ── Joint (bivariate) Kalman filter ──────────────────────────────────────────
 
-def run_bivariate_kalman_filter(df, params1, g1, params2, g2, rho, phi1=0.0, phi2=0.0):
+def run_bivariate_kalman_filter(df, params1, g1, params2, g2, rho, phi1=0.0, phi2=0.0,
+                                 static_cache1=None, static_cache2=None):
     """
     Joint (bivariate) Kalman-filter fit of:
 
@@ -609,9 +654,14 @@ def run_bivariate_kalman_filter(df, params1, g1, params2, g2, rho, phi1=0.0, phi
     cross1, cross2 : (T, N_CROSS) per-equation synergy contribution arrays
     loglik  : joint bivariate log-likelihood (single scalar, NOT split per equation)
     dim1, dim2 : state dimensions of equation 1 / equation 2 (for splitting x_smooth later)
+
+    `static_cache1`/`static_cache2`: optional, from `build_static_cache(df, g1)`
+    / `build_static_cache(df, g2)` — reuses each equation's observation
+    matrix across repeated calls instead of rebuilding it every time.
+    Safe to omit.
     """
-    pc1 = _prepare_equation(df, g1, params1)
-    pc2 = _prepare_equation(df, g2, params2)
+    pc1 = _prepare_equation(df, g1, params1, static_cache=static_cache1)
+    pc2 = _prepare_equation(df, g2, params2, static_cache=static_cache2)
     dim1, dim2 = pc1["dim"], pc2["dim"]
     dim = dim1 + dim2
     T_len = pc1["T_len"]

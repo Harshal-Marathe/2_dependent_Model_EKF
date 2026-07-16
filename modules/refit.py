@@ -29,7 +29,7 @@ from modules.dependencies import NEVERGRAD_AVAILABLE
 from modules.params import _make_globals, unpack_theta
 from modules.bounds import _build_theta0_and_bounds
 from modules.optimizer import run_nevergrad_optimizer
-from modules.kalman import run_kalman_filter, rts_smoother, _precompute_adstocked
+from modules.kalman import run_kalman_filter, rts_smoother, _precompute_adstocked, build_static_cache
 from modules.pipeline import _postprocess_equation
 
 
@@ -370,21 +370,26 @@ def run_refit_pipeline(df_full, new_config, prev_result, max_iter, method,
         manual_overrides=manual_overrides,
     )
 
+    static_cache_train = build_static_cache(df_train, g_new)
+
     if method == "Nevergrad" and NEVERGRAD_AVAILABLE and ng_cfg:
-        best_theta, _ = run_nevergrad_optimizer(df_train, g_new, theta0, bounds, ng_cfg)
+        best_theta, _ = run_nevergrad_optimizer(df_train, g_new, theta0, bounds, ng_cfg,
+                                                  static_cache=static_cache_train)
         opt_success, opt_nit = True, ng_cfg.get("budget", 500)
     else:
         def objective(theta):
             p = unpack_theta(theta, g_new)
-            _, _, _, _, _, _, _, _, loglik = run_kalman_filter(df_train, p, g_new)
+            _, _, _, _, _, _, _, _, loglik = run_kalman_filter(
+                df_train, p, g_new, static_cache=static_cache_train)
             return -loglik
         opt = minimize(objective, theta0, method=method,
                         bounds=bounds, options={"maxiter": max_iter, "ftol": 1e-9})
         best_theta, opt_success, opt_nit = opt.x, opt.success, opt.nit
 
     params = unpack_theta(best_theta, g_new)
+    static_cache_full = build_static_cache(df_full, g_new)
     yhat, residuals, x_filt, P_filt, x_pred, P_pred, Tmat, cross_beta_contrib, loglik = \
-        run_kalman_filter(df_full, params, g_new)
+        run_kalman_filter(df_full, params, g_new, static_cache=static_cache_full)
     x_smooth, P_smooth = rts_smoother(x_filt, P_filt, x_pred, P_pred, Tmat)
 
     adstocked_media = _precompute_adstocked(df_full, g_new, params)
