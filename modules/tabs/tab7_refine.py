@@ -17,6 +17,7 @@ import streamlit as st
 from modules.ui_helpers import section, info, per_channel_info, need_data, need_model
 from modules.bounds_ui import render_per_channel_bounds
 from modules.dependencies import NEVERGRAD_AVAILABLE
+from modules.result_plots import render_fit_and_contrib
 from modules.refit import (
     ROLE_LABELS, add_variable_to_config,
     variable_role_lists, run_refit_pipeline, get_current_value,
@@ -83,7 +84,15 @@ def _run_and_record(df, new_config, action_label, var_label, unfreeze_cols,
         "Action": action_label, "Variable": var_label,
         "MAPE": result["mape"], "R²": result["r2"],
     })
-    st.success(f"✅ Refit complete — MAPE {result['mape']:.2%} · R² {result['r2']:.4f}")
+    # The results panel (Actual vs Predicted / Contributions) is rendered
+    # further up the script than these buttons, so within a single script
+    # pass it would still be showing the *previous* result. Stash a message
+    # and force a full rerun so the whole page redraws top-to-bottom with
+    # the fresh refit_result already in session state.
+    st.session_state.refit_last_message = (
+        f"✅ Refit complete — MAPE {result['mape']:.2%} · R² {result['r2']:.4f}"
+    )
+    st.rerun()
 
 
 def render_tab7():
@@ -97,7 +106,10 @@ def render_tab7():
         "bounds</b> for adjustment, then refit. Anything already fitted that you "
         "don't touch keeps <b>exactly the same parameter values</b> — only the "
         "new/reopened variable(s) are actually re-optimized, starting from the "
-        "bounds you set for them."
+        "bounds you set for them. Every refit's <b>Actual vs Predicted</b> and "
+        "<b>Short/Long-term contribution</b> results are shown below as soon as "
+        "it completes. When you're happy with a refit, go to <b>Tab 6</b> to "
+        "save it as the official model."
     )
     if st.session_state.config.get("enable_second_dependent") and st.session_state.config.get("target2"):
         st.warning(
@@ -127,6 +139,12 @@ def render_tab7():
     if st.button("↩️ Reset — discard all refinements, start over from Tab 5 fit"):
         _reset_refit_state()
         st.rerun()
+
+    if st.session_state.get("refit_last_message"):
+        st.success(st.session_state.pop("refit_last_message"))
+
+    with st.expander("📈 Current Working Model — Actual vs Predicted & Contributions", expanded=True):
+        render_fit_and_contrib(df, refit_config, refit_result, target, key_prefix="refit_")
 
     st.divider()
 
@@ -253,26 +271,15 @@ def render_tab7():
 
     st.divider()
 
-    # ── Section C: promote to official model ─────────────────────────
-    st.markdown("### C · Save This Model")
-    base_mape, base_r2 = st.session_state.model_results["mape"], st.session_state.model_results["r2"]
-    dc1, dc2, dc3, dc4 = st.columns(4)
-    dc1.metric("Tab 5 baseline MAPE", f"{base_mape:.2%}")
-    dc2.metric("Current MAPE", f"{refit_result['mape']:.2%}",
-               delta=f"{(base_mape - refit_result['mape'])*100:+.2f} pp (lower is better)")
-    dc3.metric("Tab 5 baseline R²", f"{base_r2:.4f}")
-    dc4.metric("Current R²", f"{refit_result['r2']:.4f}", delta=f"{refit_result['r2']-base_r2:+.4f}")
-
+    # ── Section C: parameter table (saving now happens in Tab 6) ─────
+    st.markdown("### C · Current Parameter Table")
     with st.expander("📋 Current parameter table", expanded=False):
         st.dataframe(refit_result["param_df"], use_container_width=True, hide_index=True)
         st.download_button(
             "📥 Download parameters", refit_result["param_df"].to_csv(index=False).encode(),
             "refit_parameters.csv", "text/csv", key="refit_param_dl",
         )
-
-    if st.button("💾 Save as official model (used in Tab 6 · Results & ROI)",
-                 type="primary", use_container_width=True, key="refit_promote_btn"):
-        st.session_state.config = st.session_state.refit_config
-        st.session_state.model_results = st.session_state.refit_result
-        st.session_state.model_fitted = True
-        st.success("✅ Saved. Tab 6 now reflects this refined model.")
+    st.info(
+        "➡️ Head to **Tab 6 · Results & ROI Analytics** to compare this refined "
+        "model against the Tab 5 baseline and **save it as the official model**."
+    )

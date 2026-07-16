@@ -71,6 +71,16 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
             idx = 1 + g["N_MEDIA"] + g["N_COMP"] + g["N_OWN_NONMEDIA"] + g["N_COMP_NONMEDIA"] + PRICE_COLS.index(col)
             x_smooth[:, idx] = np.minimum(x_smooth[:, idx], 0.0)
 
+    # Baseline floor — a market-mix baseline shouldn't be negative or
+    # near-zero. The forward filter already floors it (see
+    # modules/kalman.py::_apply_beta_floors), but the RTS backward pass
+    # can still pull it below the floor again since smoothing is an
+    # unconstrained blend of filtered + next-period-smoothed values.
+    min_base_fraction = float(g.get("MIN_BASE_FRACTION", 0.0))
+    if min_base_fraction > 0:
+        intercept_floor = min_base_fraction * float(df_full[TARGET_COL].mean())
+        x_smooth[:, 0] = np.maximum(x_smooth[:, 0], intercept_floor)
+
     L_mat_full  = _build_observation_matrix(df_full, g, adstocked_media)
     yhat_smooth = (L_mat_full * x_smooth).sum(axis=1)
 

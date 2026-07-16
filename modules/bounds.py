@@ -27,8 +27,8 @@ def _build_theta0_and_bounds(df, g):
         return (lo_def, hi_def)
 
     # ── Beta persistence ──────────────────────────────────────────────
-    ls_bounds = [_b(c, "ls", 0.01, 1.0) for c in MEDIA_COLS]
-    ls_init   = [np.clip(0.98, lo, hi) for lo, hi in ls_bounds]
+    ls_bounds = [_b(c, "ls", 0.2, 0.8) for c in MEDIA_COLS]
+    ls_init   = [np.clip(0.5, lo, hi) for lo, hi in ls_bounds]
 
     # G0 bound
     G0_bound = (0.7, 0.99)
@@ -91,8 +91,8 @@ def _build_theta0_and_bounds(df, g):
         adstock_bounds = []
 
     # ── Non-media / organic ───────────────────────────────────────────
-    own_nm_ls_bounds    = [(0.1, 1.0)] * N_OWN_NONMEDIA
-    comp_nm_ls_bounds   = [(0.1, 1.0)] * N_COMP_NONMEDIA
+    own_nm_ls_bounds    = [_b(c, "ls", 0.2, 0.8) for c in g["OWN_NONMEDIA_COLS"]]
+    comp_nm_ls_bounds   = [_b(c, "ls", 0.2, 0.8) for c in g["COMP_NONMEDIA_COLS"]]
     def _nm_delta_bound(col):
         if col in POSITIVE_BETA_COLS: return (0.0, None)
         if col in NEGATIVE_BETA_COLS: return (None, 0.0)
@@ -101,9 +101,10 @@ def _build_theta0_and_bounds(df, g):
     comp_nm_delta_bounds = [(None, 0)] * N_COMP_NONMEDIA
 
     # ── Competitor media ──────────────────────────────────────────────
-    ls_comp_bounds  = [_b(c, "ls",     0.2, 1.0)  for c in COMP_MEDIA_COLS]
+    ls_comp_bounds  = [_b(c, "ls",     0.2, 0.8)  for c in COMP_MEDIA_COLS]
     n_comp_bounds   = [_b(c, "hill_n", 0.3, 5.0)  for c in COMP_MEDIA_COLS]
     s_comp_bounds   = [_b(c, "hill_s", 1e-6, 1e8) for c in COMP_MEDIA_COLS]
+    price_ls_bounds = [_b(c, "ls", 0.2, 0.8) for c in g["PRICE_COLS"]]
 
     # ── theta0 assembly ───────────────────────────────────────────────
     theta0 = np.concatenate([
@@ -115,18 +116,18 @@ def _build_theta0_and_bounds(df, g):
         S_init,
         n_int_init,
         adstock_init,
-        np.full(N_OWN_NONMEDIA, 0.98),
-        np.full(N_COMP_NONMEDIA, 0.98),
+        [np.clip(0.5, lo, hi) for lo, hi in own_nm_ls_bounds] if N_OWN_NONMEDIA else [],
+        [np.clip(0.5, lo, hi) for lo, hi in comp_nm_ls_bounds] if N_COMP_NONMEDIA else [],
         np.full(N_OWN_NONMEDIA, 0.01),
         np.full(N_COMP_NONMEDIA, -0.01),
-        np.full(N_COMP, 0.98),
+        [np.clip(0.5, lo, hi) for lo, hi in ls_comp_bounds] if N_COMP else [],
         np.full(N_COMP, 0.02),
         np.full(N_COMP, 1.5),
         [safe_median(df[c]) for c in COMP_MEDIA_COLS] if COMP_MEDIA_COLS else [],
         np.full(N_CROSS, 0.02),
         np.full(N_CROSS, 1.5),
         np.full(N_CROSS, 1.0),
-        np.full(N_PRICE, 0.98),
+        [np.clip(0.5, lo, hi) for lo, hi in price_ls_bounds] if N_PRICE else [],
         np.full(N_PRICE, -0.01),
         [0.0] if USE_ORGANIC_DRIFT else [],
         [max(df[g["TARGET_COL"]].std() * 0.3, 1e-3)],
@@ -152,7 +153,7 @@ def _build_theta0_and_bounds(df, g):
         [(0, None)] * N_CROSS +          # cross_delta
         [(0.3, 5.0)] * N_CROSS +         # cross_n
         [(1e-6, None)] * N_CROSS +       # cross_S
-        [(0.8, 1.0)] * N_PRICE +         # Ls_price
+        price_ls_bounds +                # Ls_price
         [(None, 0)] * N_PRICE +          # delta_price
         ([(-1.0, 1.0)] if USE_ORGANIC_DRIFT else []) +
         [(1e-3, None)]                   # sigma_y

@@ -46,11 +46,10 @@ def render_per_channel_bounds(channel_cols, comp_cols, key_prefix, df,
                 st.markdown("**Beta Persistence (Ls)**")
                 lsc1, lsc2 = st.columns(2)
                 with lsc1:
-                    ls_lo = st.number_input("Ls min", 0.0, 1.0,
-                                             0.8 if is_comp else 0.5, 0.01,
+                    ls_lo = st.number_input("Ls min", 0.0, 1.0, 0.2, 0.01,
                                              key=f"{key_prefix}ls_lo_{col}")
                 with lsc2:
-                    ls_hi = st.number_input("Ls max", 0.0, 1.0, 1.0, 0.01,
+                    ls_hi = st.number_input("Ls max", 0.0, 1.0, 0.8, 0.01,
                                              key=f"{key_prefix}ls_hi_{col}")
                 bounds[col]["ls"] = (ls_lo, ls_hi)
                 st.divider()
@@ -137,10 +136,10 @@ def render_per_channel_bounds(channel_cols, comp_cols, key_prefix, df,
                 st.markdown("**Beta Persistence (Ls_price)**")
                 pc1, pc2 = st.columns(2)
                 with pc1:
-                    p_ls_lo = st.number_input("Ls min", 0.0, 1.0, 0.8, 0.01,
+                    p_ls_lo = st.number_input("Ls min", 0.0, 1.0, 0.2, 0.01,
                                                key=f"{key_prefix}p_ls_lo_{col}")
                 with pc2:
-                    p_ls_hi = st.number_input("Ls max", 0.0, 1.0, 1.0, 0.01,
+                    p_ls_hi = st.number_input("Ls max", 0.0, 1.0, 0.8, 0.01,
                                                key=f"{key_prefix}p_ls_hi_{col}")
                 bounds[col]["ls"] = (p_ls_lo, p_ls_hi)
                 st.caption(f"✅ Bounds set for: {', '.join(bounds[col].keys())}")
@@ -158,10 +157,10 @@ def render_per_channel_bounds(channel_cols, comp_cols, key_prefix, df,
                 st.markdown("**Beta Persistence (Ls_nonmedia)**")
                 nm1, nm2 = st.columns(2)
                 with nm1:
-                    nm_ls_lo = st.number_input("Ls min", 0.0, 1.0, 0.8, 0.01,
+                    nm_ls_lo = st.number_input("Ls min", 0.0, 1.0, 0.2, 0.01,
                                                 key=f"{key_prefix}nm_ls_lo_{col}")
                 with nm2:
-                    nm_ls_hi = st.number_input("Ls max", 0.0, 1.0, 1.0, 0.01,
+                    nm_ls_hi = st.number_input("Ls max", 0.0, 1.0, 0.8, 0.01,
                                                 key=f"{key_prefix}nm_ls_hi_{col}")
                 bounds[col]["ls"] = (nm_ls_lo, nm_ls_hi)
                 st.caption(f"✅ Bounds set for: {', '.join(bounds[col].keys())}")

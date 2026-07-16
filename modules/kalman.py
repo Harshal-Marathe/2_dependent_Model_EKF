@@ -211,12 +211,66 @@ def _build_transition_matrix(g, params):
 
 # ── Process noise ────────────────────────────────────────────────────────────
 
-def _build_process_noise(g):
+def _build_process_noise(df, g):
     N_MEDIA = g["N_MEDIA"]; N_COMP = g["N_COMP"]
     N_OWN_NONMEDIA = g["N_OWN_NONMEDIA"]; N_COMP_NONMEDIA = g["N_COMP_NONMEDIA"]
     N_PRICE = g["N_PRICE"]; N_DUMMIES = g["N_DUMMIES"]; SEASONAL_DIM = g["SEASONAL_DIM"]
     dim = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + N_COMP_NONMEDIA + N_PRICE + N_DUMMIES + SEASONAL_DIM
-    Q = np.eye(dim) * 1e-6; Q[0, 0] = 1e-4
+    Q = np.eye(dim) * 1e-6
+    target_mean = float(df[g["TARGET_COL"]].mean())
+
+    # Intercept process noise: previously a flat 1e-4 regardless of the
+    # target's actual scale/units, which made it negligible for most
+    # business data and left the intercept almost frozen wherever its very
+    # first (loosely-constrained) update landed — including negative.
+    # Scaling it off the target's own mean gives the intercept genuine,
+    # data-scale-appropriate period-to-period flexibility so it can drift
+    # back toward a sensible level instead of getting stuck.
+    intercept_noise_scale = float(g.get("INTERCEPT_NOISE_SCALE", 0.0))
+    if intercept_noise_scale > 0 and target_mean > 0:
+        Q[0, 0] = (intercept_noise_scale * target_mean) ** 2
+    else:
+        Q[0, 0] = 1e-4  # legacy fallback (effectively frozen)
+
+    # Beta states (media / comp-media / non-media / comp-non-media / price):
+    # each beta evolves as β_t = Ls·β_{t-1} + δ·trigger_t. With a flat,
+    # unit-free 1e-6 process noise the filter treated that as almost
+    # perfectly deterministic — no real ability to wiggle back up on its
+    # own. Combined with Ls < 1, that guarantees geometric decay toward
+    # zero for EVERY channel whenever its forcing term weakens, regardless
+    # of whether that's actually true of that channel's real-world effect.
+    #
+    # Scale each beta's process noise so a "beta_noise_scale" fraction of
+    # this is honoured consistently across channels of very different
+    # units (spend in thousands vs. a 0/1 flag, say): allow the beta to
+    # wander enough, per period, that — once multiplied by that channel's
+    # own typical magnitude — the resulting contribution could move by
+    # roughly `beta_noise_scale` × the target's average value. This is
+    # the direct beta-level analogue of the intercept treatment above.
+    beta_noise_scale = float(g.get("BETA_NOISE_SCALE", 0.0))
+
+    def _beta_q(col):
+        if beta_noise_scale <= 0 or target_mean <= 0 or col not in df.columns:
+            return 1e-6  # legacy fallback (effectively frozen)
+        reg_mean = float(np.mean(np.abs(df[col].values)))
+        if reg_mean < 1e-9:
+            return 1e-6
+        return (beta_noise_scale * target_mean / reg_mean) ** 2
+
+    for i, col in enumerate(g["MEDIA_COLS"]):
+        Q[i + 1, i + 1] = _beta_q(col)
+    for j, col in enumerate(g["COMP_MEDIA_COLS"]):
+        Q[1 + N_MEDIA + j, 1 + N_MEDIA + j] = _beta_q(col)
+    for k, col in enumerate(g["OWN_NONMEDIA_COLS"]):
+        idx = 1 + N_MEDIA + N_COMP + k
+        Q[idx, idx] = _beta_q(col)
+    for k, col in enumerate(g["COMP_NONMEDIA_COLS"]):
+        idx = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + k
+        Q[idx, idx] = _beta_q(col)
+    for p, col in enumerate(g["PRICE_COLS"]):
+        idx = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + N_COMP_NONMEDIA + p
+        Q[idx, idx] = _beta_q(col)
+
     for d in range(N_DUMMIES):
         idx = 1+N_MEDIA+N_COMP+N_OWN_NONMEDIA+N_COMP_NONMEDIA+d; Q[idx, idx] = 5e-3
     return Q
@@ -261,7 +315,17 @@ def _prepare_equation(df, g, params):
     adstocked_media = _precompute_adstocked(df, g, params)
     L_mat = _build_observation_matrix(df, g, adstocked_media)
     Tmat  = _build_transition_matrix(g, params)
-    Q     = _build_process_noise(g)
+    Q     = _build_process_noise(df, g)
+
+    # Baseline floor: the intercept can never be reported below this
+    # fraction of the target's average value — a market-mix baseline
+    # representing organic demand shouldn't be negative or near-zero.
+    # Set MIN_BASE_FRACTION to 0 (config "min_base_fraction") to disable.
+    min_base_fraction = float(g.get("MIN_BASE_FRACTION", 0.0))
+    intercept_floor = (
+        min_base_fraction * float(df[TARGET_COL].mean())
+        if min_base_fraction > 0 else -np.inf
+    )
 
     # Applied to RAW spend (not adstocked) — this is the δ_i · f(x_i,t) term
     # in the state transition equation.
@@ -344,6 +408,7 @@ def _prepare_equation(df, g, params):
         weibull_lagsum_own=weibull_lagsum_own,
         positive_cols=positive_cols, negative_cols=negative_cols,
         positive_state_idx=positive_state_idx, negative_state_idx=negative_state_idx,
+        intercept_floor=intercept_floor,
         target_vals=df[TARGET_COL].values,
     )
 
@@ -452,6 +517,9 @@ def _predict_step(t, x_prev, df, pc):
 
 
 def _apply_beta_floors(x_vec, pc):
+    floor = pc.get("intercept_floor", -np.inf)
+    if x_vec[0] < floor:
+        x_vec[0] = floor
     for idx in pc["positive_state_idx"]:
         if x_vec[idx] < 0:
             x_vec[idx] = 1e-8

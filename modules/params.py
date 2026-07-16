@@ -35,6 +35,23 @@ def _make_globals(cfg: dict):
     g["NEGATIVE_BETA_COLS"]  = cfg.get("negative_beta_cols", [])
     g["PER_CHANNEL_BOUNDS"]  = cfg.get("per_channel_bounds", {})
 
+    # ── Baseline (intercept) floor & flexibility ─────────────────────
+    # MIN_BASE_FRACTION: the intercept/baseline is floored at this fraction
+    # of the target's average value (e.g. 0.03 = baseline can never be
+    # reported below 3% of average demand). Set to 0 to disable.
+    # INTERCEPT_NOISE_SCALE: how much the intercept is allowed to drift
+    # period-to-period (as a fraction of the target's average value,
+    # 1-std per step). Set to 0 to fall back to the old, nearly-frozen
+    # behaviour. See modules/kalman.py::_build_process_noise.
+    g["MIN_BASE_FRACTION"]     = float(cfg.get("min_base_fraction", 0.03))
+    g["INTERCEPT_NOISE_SCALE"] = float(cfg.get("intercept_noise_scale", 0.02))
+    # BETA_NOISE_SCALE: same idea as INTERCEPT_NOISE_SCALE, but for every
+    # channel beta (media/comp-media/non-media/comp-non-media/price). Lets
+    # each beta drift period-to-period instead of being locked into pure
+    # Ls-driven geometric decay whenever its forcing term weakens. See
+    # modules/kalman.py::_build_process_noise.
+    g["BETA_NOISE_SCALE"]      = float(cfg.get("beta_noise_scale", 0.02))
+
     g["N_MEDIA"]         = len(g["MEDIA_COLS"])
     g["N_COMP"]          = len(g["COMP_MEDIA_COLS"])
     g["N_OWN_NONMEDIA"]  = len(g["OWN_NONMEDIA_COLS"])

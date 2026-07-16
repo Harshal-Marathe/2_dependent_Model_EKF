@@ -16,12 +16,55 @@ from modules.transforms import hill_transform, power_transform, apply_transforma
 from modules.exports import build_betas_df, build_master_workbook_bytes
 
 
+def _render_tab7_promote_section():
+    """If Tab 7 · Refine & Refit has produced a working model that differs
+    from the currently-saved official model, surface a compare-and-save
+    panel here so the whole 'refit → review → save' loop lives in one
+    place: refits happen in Tab 7, saving happens here in Tab 6."""
+    refit_result = st.session_state.get("refit_result")
+    refit_config = st.session_state.get("refit_config")
+    if refit_result is None or refit_config is None:
+        return
+
+    steps_taken = len(st.session_state.get("refit_history", [])) - 1
+    if steps_taken <= 0:
+        return  # nothing refined yet — nothing to promote
+
+    already_saved = refit_result is st.session_state.model_results
+    with st.container(border=True):
+        st.markdown("### 🔧 Refined Model Available (from Tab 7 · Refine & Refit)")
+        base_mape = st.session_state.model_results["mape"]
+        base_r2   = st.session_state.model_results["r2"]
+        dc1, dc2, dc3, dc4 = st.columns(4)
+        dc1.metric("Tab 5 baseline MAPE", f"{base_mape:.2%}")
+        dc2.metric("Refined MAPE", f"{refit_result['mape']:.2%}",
+                   delta=f"{(base_mape - refit_result['mape'])*100:+.2f} pp (lower is better)")
+        dc3.metric("Tab 5 baseline R²", f"{base_r2:.4f}")
+        dc4.metric("Refined R²", f"{refit_result['r2']:.4f}",
+                   delta=f"{refit_result['r2']-base_r2:+.4f}")
+        st.caption(f"{steps_taken} refinement step(s) taken in Tab 7.")
+
+        if already_saved:
+            st.success("✅ This refined model is already saved and is what's shown below.")
+        else:
+            if st.button("💾 Save this refined model as the official model",
+                         type="primary", use_container_width=True, key="tab6_promote_btn"):
+                st.session_state.config = refit_config
+                st.session_state.model_results = refit_result
+                st.session_state.model_fitted = True
+                st.success("✅ Saved. Results below now reflect the refined model.")
+                st.rerun()
+    st.divider()
+
+
 def render_tab6():
     section("06", "Results & ROI Analytics")
     if not st.session_state.model_fitted: need_model()
 
     config = st.session_state.config
     df     = st.session_state.df
+
+    _render_tab7_promote_section()
 
     has_dep2 = bool(st.session_state.get("model_fitted_2") and st.session_state.get("model_results_2"))
     if has_dep2:

@@ -426,6 +426,35 @@ def render_tab4():
     with c2: use_price   = st.checkbox("Include price effects", value=bool(price_vars), key="use_price")
     if use_price_2 is None:
         use_price_2 = use_price  # Dep 2 mirrors Dep 1 unless an independent predictor set was configured
+
+    bc1, bc2, bc3 = st.columns(3)
+    with bc1:
+        min_base_fraction = st.number_input(
+            "Baseline floor (% of avg demand)", 0.0, 0.5, 0.03, 0.01,
+            key="min_base_fraction",
+            help="The intercept/baseline is never reported below this fraction "
+                 "of the target's average value — e.g. 0.03 means the baseline "
+                 "can't drop below 3% of average demand. Set to 0 to disable "
+                 "(old behaviour: baseline can go negative).")
+    with bc2:
+        intercept_noise_scale = st.number_input(
+            "Baseline flexibility (% of avg demand / period)", 0.0, 0.5, 0.02, 0.01,
+            key="intercept_noise_scale",
+            help="How much the baseline is allowed to drift period-to-period "
+                 "(as a fraction of average demand, 1-std per period). Higher "
+                 "= the baseline can self-correct more freely instead of "
+                 "getting stuck near the floor. Set to 0 for the old, "
+                 "nearly-frozen behaviour.")
+    with bc3:
+        beta_noise_scale = st.number_input(
+            "Channel beta flexibility (% of avg demand / period)", 0.0, 0.5, 0.02, 0.01,
+            key="beta_noise_scale",
+            help="Same idea as baseline flexibility, but for every channel's "
+                 "beta (media, comp-media, non-media, price). Without this, "
+                 "each beta can only move via Ls·prev + δ·trigger — with "
+                 "Ls < 1, that guarantees it decays toward zero whenever its "
+                 "trigger weakens, whether or not that's true of the real "
+                 "effect. Set to 0 for the old, nearly-frozen behaviour.")
     # Any numeric column from the uploaded file can boost the intercept —
     # not just variables already assigned a role (media/non-media) in the
     # sales equation above. Only the dependent variable(s) are excluded.
@@ -598,6 +627,9 @@ def render_tab4():
                 "adstock_n_lags": int(n_lags),
                 "use_organic": use_organic,
                 "use_price": use_price,
+                "min_base_fraction": float(min_base_fraction),
+                "intercept_noise_scale": float(intercept_noise_scale),
+                "beta_noise_scale": float(beta_noise_scale),
                 "train_ratio": train_ratio,
                 "n_train": n_train,
                 "n_test": n_test,
