@@ -101,9 +101,19 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
     prev_intercept = np.empty(len(df_full))
     prev_intercept[1:] = x_smooth[:-1, 0]
     prev_intercept[0]  = x_smooth[0, 0]
-    long_term_intercept = G0 * prev_intercept
-    contrib_df["LongTerm_Intercept"]  = long_term_intercept
-    contrib_df["ShortTerm_Intercept"] = x_smooth[:, 0] - long_term_intercept
+    intercept_carryover = G0 * prev_intercept
+
+    # Short-term view: the intercept as it actually enters the observation
+    # equation, Y_t = intercept_t + Σ beta_i,t * media_i,t + ...  (i.e. the
+    # full smoothed intercept level, not a residual).
+    contrib_df["ShortTerm_Intercept"] = x_smooth[:, 0]
+
+    # Long-term view: decompose that SAME intercept per its own state
+    # equation, I_t = G0 * I_(t-1) + Σ_k gamma_k * media_k,t^n_k_intercept,
+    # into a carryover piece and (below) a per-effector boost piece. Named
+    # "Intercept Carryover" (not "Intercept") so it doesn't collide with the
+    # short-term "Intercept" row when Short-Term + Long-Term are combined.
+    contrib_df["LongTerm_Intercept Carryover"] = intercept_carryover
 
     for i, col in enumerate(MEDIA_COLS):
         # Matches the observation equation: β_i,t is multiplied by RAW spend/
