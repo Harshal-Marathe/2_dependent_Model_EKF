@@ -21,6 +21,7 @@ useful as a single coherent sheet rather than four unrelated tables.
 """
 
 import io
+import zipfile
 
 import numpy as np
 import pandas as pd
@@ -277,6 +278,46 @@ def build_master_workbook_bytes(res, config, df_full):
         for row_idx in range(2, legend_ws.max_row + 1):
             legend_ws.column_dimensions["B"].width = 90
             legend_ws.cell(row=row_idx, column=2).alignment = Alignment(wrap_text=True)
+
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def build_full_results_zip_bytes(res, config, df_full, response_curve_images=None):
+    """Bundle every downloadable Results artifact into one ZIP:
+      - contributions.csv           (full contrib_df, incl. Short/Long/Synergy)
+      - hyperparameters.csv         (param_df)
+      - roi_report.csv              (roi_df)
+      - synergy_table.csv           (synergy_df, if any cross-media pairs configured)
+      - betas_timeseries.csv        (per-period Beta_<variable>, see build_betas_df)
+      - model_export.xlsx           (the full master workbook — same as the
+                                      "Download Full Excel Workbook" button)
+      - response_curves/*.png       (one image per channel, if provided)
+
+    response_curve_images: optional dict {filename: png_bytes} to drop into
+    a response_curves/ folder inside the zip (built by the caller, e.g. one
+    PNG per media channel from Tab 6 · Section H).
+    """
+    betas_df = build_betas_df(res, df_full)
+    param_df = res["param_df"]
+    roi_df   = res["roi_df"]
+    contrib_df = res["contrib_df"]
+    synergy_df = res.get("synergy_df")
+    has_synergy = synergy_df is not None and not synergy_df.empty
+
+    workbook_bytes = build_master_workbook_bytes(res, config, df_full)
+
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("contributions.csv", contrib_df.to_csv().encode())
+        zf.writestr("hyperparameters.csv", param_df.to_csv(index=False).encode())
+        zf.writestr("roi_report.csv", roi_df.to_csv(index=False).encode())
+        if has_synergy:
+            zf.writestr("synergy_table.csv", synergy_df.to_csv(index=False).encode())
+        zf.writestr("betas_timeseries.csv", betas_df.to_csv(index=False).encode())
+        zf.writestr("model_export.xlsx", workbook_bytes)
+        for fname, img_bytes in (response_curve_images or {}).items():
+            zf.writestr(f"response_curves/{fname}", img_bytes)
 
     buffer.seek(0)
     return buffer.getvalue()

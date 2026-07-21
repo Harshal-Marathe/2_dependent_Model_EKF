@@ -17,7 +17,7 @@ import streamlit as st
 from modules.ui_helpers import section, info, per_channel_info, need_data, need_model
 from modules.bounds_ui import render_per_channel_bounds
 from modules.dependencies import NEVERGRAD_AVAILABLE
-from modules.result_plots import render_fit_and_contrib
+from modules.tabs.tab6_results import render_full_results
 from modules.refit import (
     ROLE_LABELS, add_variable_to_config,
     variable_role_lists, run_refit_pipeline, get_current_value,
@@ -143,8 +143,15 @@ def render_tab7():
     if st.session_state.get("refit_last_message"):
         st.success(st.session_state.pop("refit_last_message"))
 
-    with st.expander("📈 Current Working Model — Actual vs Predicted & Contributions", expanded=True):
-        render_fit_and_contrib(df, refit_config, refit_result, target, key_prefix="refit_")
+    with st.expander("📈 Current Working Model — Full Results & ROI Analytics (same as Tab 6)",
+                      expanded=True):
+        st.caption(
+            "Everything below reflects the **current working (refit) model** — "
+            "identical sections and download buttons to Tab 6, so you don't need "
+            "to switch tabs to review or export a refit before deciding whether "
+            "to save it as the official model."
+        )
+        render_full_results(df, refit_config, refit_result, target, key_prefix="tab7_")
 
     st.divider()
 

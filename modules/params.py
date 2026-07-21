@@ -35,6 +35,22 @@ def _make_globals(cfg: dict):
     g["NEGATIVE_BETA_COLS"]  = cfg.get("negative_beta_cols", [])
     g["PER_CHANNEL_BOUNDS"]  = cfg.get("per_channel_bounds", {})
 
+    # ── Media input type (Spend vs GRP/Impressions) ──────────────────
+    # A channel whose raw values are GRP/impressions (not currency) can't
+    # have its own column summed as "total spend" for ROI — instead it is
+    # mapped, in Tab 4 · Section D2 (or Tab 7's per-channel bounds widget),
+    # to the actual spend column whose total should be used as the ROI
+    # denominator. Stored inline in per_channel_bounds[col]["__spend_col__"]
+    # so it always travels with that channel's bounds (Tab 4 save, Tab 7
+    # add-variable / bound-adjustment) without a second config key to keep
+    # in sync. See modules/bounds_ui.py and modules/pipeline.py's ROI table.
+    g["MEDIA_SPEND_MAP"] = {
+        col: bdict["__spend_col__"]
+        for col, bdict in g["PER_CHANNEL_BOUNDS"].items()
+        if isinstance(bdict, dict) and bdict.get("__spend_col__")
+    }
+
+
     # ── Baseline (intercept) floor & flexibility ─────────────────────
     # MIN_BASE_FRACTION: the intercept/baseline is floored at this fraction
     # of the target's average value (e.g. 0.03 = baseline can never be

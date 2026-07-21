@@ -42,6 +42,42 @@ def render_per_channel_bounds(channel_cols, comp_cols, key_prefix, df,
                            f"max: **{col_max:,.2f}**")
                 bounds[col] = {}
 
+                # Media input type — Spend vs GRP/Impressions. ROI is
+                # Total Contribution ÷ Total Spend; if this channel's raw
+                # column is GRP/impressions rather than currency, summing
+                # it directly is meaningless as "spend", so the actual
+                # spend column is picked here and its TOTAL is used as
+                # the ROI denominator instead (see modules/pipeline.py).
+                if not is_comp:
+                    st.markdown("**Media Input Type**")
+                    input_type = st.radio(
+                        "Is this channel's data Spend or GRP / Impressions?",
+                        ["Spend", "GRP / Impressions"],
+                        horizontal=True,
+                        key=f"{key_prefix}input_type_{col}",
+                        help="Leave as **Spend** if this column is currency — its own "
+                             "total is used for ROI as before. Pick **GRP / Impressions** "
+                             "if this column is not currency; you'll then pick the actual "
+                             "spend column below, and ITS total (not this column's total) "
+                             "is used as the ROI denominator for this channel.",
+                    )
+                    if input_type == "GRP / Impressions":
+                        spend_options = [c for c in df.columns if c != col]
+                        if spend_options:
+                            spend_col = st.selectbox(
+                                f"Spend column for {col}'s ROI",
+                                spend_options,
+                                key=f"{key_prefix}spend_col_{col}",
+                            )
+                            bounds[col]["__spend_col__"] = spend_col
+                            st.caption(
+                                f"💰 ROI for **{col}** = Total Contribution ÷ Total "
+                                f"**{spend_col}** (not ÷ Total {col})."
+                            )
+                        else:
+                            st.warning("No other numeric column available to use as the spend column.")
+                    st.divider()
+
                 # Beta persistence
                 st.markdown("**Beta Persistence (Ls)**")
                 lsc1, lsc2 = st.columns(2)
@@ -119,7 +155,8 @@ def render_per_channel_bounds(channel_cols, comp_cols, key_prefix, df,
                         "Ls would double-count the same carryover."
                     )
 
-                st.caption(f"✅ Bounds set for: {', '.join(bounds[col].keys())}")
+                _shown_params = [p for p in bounds[col].keys() if not p.startswith("__")]
+                st.caption(f"✅ Bounds set for: {', '.join(_shown_params)}")
     else:
         st.info("Select media channels in Section A first.")
 

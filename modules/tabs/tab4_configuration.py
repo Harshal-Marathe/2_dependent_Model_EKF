@@ -504,7 +504,12 @@ def render_tab4():
         "separate bounds — so media betas, competition betas, price betas, and control "
         "betas are constrained independently. "
         "Defaults are derived from each channel's data distribution. "
-        "Expand a channel to customise its bounds."
+        "Expand a channel to customise its bounds. "
+        "Each own-media channel also has a <b>Media Input Type</b> toggle: leave it as "
+        "<b>Spend</b> if the column is currency (ROI uses that column's own total as "
+        "before), or switch to <b>GRP / Impressions</b> and pick the matching spend "
+        "column — that spend column's total will then be used as the ROI denominator "
+        "for this channel instead."
     )
 
     all_channel_cols = list(media) + list(comp_media)
@@ -533,6 +538,7 @@ def render_tab4():
              "Max": f"{v[1]:.4g}" if v[1] is not None else "∞"}
             for col, bdict in per_channel_bounds.items()
             for param, v in bdict.items()
+            if not param.startswith("__")
         ]
         if rows:
             with st.expander("📋 Dep 1 — all per-variable bounds summary", expanded=False):
@@ -576,6 +582,7 @@ def render_tab4():
                  "Max": f"{v[1]:.4g}" if v[1] is not None else "∞"}
                 for col, bdict in per_channel_bounds_2.items()
                 for param, v in bdict.items()
+                if not param.startswith("__")
             ]
             if rows2:
                 with st.expander("📋 Dep 2 — all per-variable bounds summary", expanded=False):
@@ -598,6 +605,7 @@ def render_tab4():
             st.error("Select at least one media channel.")
         else:
             n_bounds_set = sum(len(v) for v in per_channel_bounds.values())
+            n_grp_mapped = sum(1 for v in per_channel_bounds.values() if v.get("__spend_col__"))
             prophet_in_model = [c for c in non_media if c.startswith("prophet_")]
             st.session_state.config = {
                 "target": target,
@@ -653,7 +661,9 @@ def render_tab4():
                 f"train/test: **{n_train}/{n_test}** · "
                 f"positive-beta: **{len(positive_beta_cols)}** · "
                 f"negative-beta: **{len(negative_beta_cols)}** · "
-                f"per-variable bound params: **{n_bounds_set}**"
+                f"per-variable bound params: **{n_bounds_set}**" +
+                (f" · GRP/Impression channels mapped to a spend column: **{n_grp_mapped}**"
+                 if n_grp_mapped else "")
             )
             if prophet_in_model:
                 prophet_info(

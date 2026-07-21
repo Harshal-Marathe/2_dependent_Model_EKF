@@ -150,11 +150,26 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
     for k, (tgt, src) in enumerate(g["CROSS_MEDIA_PAIRS"]):
         contrib_df[f"Synergy_{tgt}_from_{src}"] = cross_beta_contrib[:, k]
 
+    # ROI denominator: for a channel whose raw input is GRP/impressions
+    # (not currency), summing that column itself is meaningless as
+    # "spend". MEDIA_SPEND_MAP (built in modules/params.py from
+    # per_channel_bounds[col]["__spend_col__"], set in Tab 4 · D2 / Tab 7)
+    # maps such a channel to its real spend column, whose TOTAL is used
+    # as the ROI denominator instead. Channels left as "Spend" (the
+    # default) fall back to summing themselves, unchanged from before.
+    media_spend_map = g.get("MEDIA_SPEND_MAP", {})
     roi_rows = []
     for col in MEDIA_COLS:
         tc = contrib_df[f"ShortTerm_{col}"].sum() + contrib_df[f"LongTerm_{col}"].sum()
-        ts = df_full[col].sum()
-        roi_rows.append({"Channel": col, "TotalSpend": ts, "TotalContrib": tc,
+        spend_col = media_spend_map.get(col, col)
+        if spend_col in df_full.columns:
+            ts = df_full[spend_col].sum()
+        else:
+            spend_col = col
+            ts = df_full[col].sum()
+        roi_rows.append({"Channel": col,
+                         "InputType": "GRP/Impressions" if spend_col != col else "Spend",
+                         "SpendColumn": spend_col, "TotalSpend": ts, "TotalContrib": tc,
                          "ROI": tc/ts if ts > 0 else 0})
     roi_df = pd.DataFrame(roi_rows)
 

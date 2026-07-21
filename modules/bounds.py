@@ -31,8 +31,8 @@ def _build_theta0_and_bounds(df, g):
     ls_init   = [np.clip(0.5, lo, hi) for lo, hi in ls_bounds]
 
     # G0 bound
-    G0_bound = (0.5, 0.9)
-    G0_init  = 0.5  # or similar, just keep it inside the new bound
+    G0_bound = (0.7, 0.99)
+    G0_init  = 1.0  # or similar, just keep it inside the new bound
 
     # delta bounds: positive or negative constraint per media col
     def _delta_bound(col):
