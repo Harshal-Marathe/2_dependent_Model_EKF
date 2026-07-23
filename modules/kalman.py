@@ -1,5 +1,5 @@
 """
-Extended Kalman Filter core: observation/transition/process-noise matrix
+Recursive Bayesian Estimation core: observation/transition/process-noise matrix
 builders, the forward filter, and the RTS (Rauch-Tung-Striebel) smoother.
 
 State equations (all 4 adstock × transform combinations), per dependent
@@ -44,7 +44,7 @@ Joint (bivariate) Kalman-filter fit
 ──────────────────────────────────────────────────────────────────────────
 When a second dependent variable is configured (e.g. Consideration /
 Top-of-Mind alongside Sales), the two equations above are NOT fitted as
-two separate, independent EKF runs. Instead they are stacked into a single
+two separate, independent RBE runs. Instead they are stacked into a single
 joint (bivariate) state-space model and filtered together:
 
     [ sales_t         ]   [ Intercept_sales_t         ]   [ error_sales_t         ]
@@ -486,7 +486,7 @@ def _initial_state(df, g, params, pc):
 def _predict_step(t, x_prev, df, pc):
     """
     One equation's nonlinear state-prediction step (the x_p = f(x_{t-1}, x_t)
-    part of the EKF), identical to the per-timestep logic previously inlined
+    part of the RBE), identical to the per-timestep logic previously inlined
     in run_kalman_filter's forward loop. Used by both the single-equation
     filter and (twice per t, once per dependent variable) by the joint
     bivariate filter.
@@ -572,7 +572,7 @@ def _apply_beta_floors(x_vec, pc):
 # ── Main (single-equation) Kalman filter ─────────────────────────────────────
 
 def run_kalman_filter(df, params, g, static_cache=None):
-    """Single-dependent-variable EKF (used when no second dependent
+    """Single-dependent-variable RBE (used when no second dependent
     variable is configured, and internally re-uses the same building
     blocks as the joint bivariate filter below).
 

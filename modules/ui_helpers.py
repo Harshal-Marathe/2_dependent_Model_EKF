@@ -59,7 +59,7 @@ def need_config():
 
 
 def need_model():
-    st.warning("🚀 Run the EKF model in **Step 6** first."); st.stop()
+    st.warning("🚀 Run the RBE model in **Step 6** first."); st.stop()
 
 
 # ════════════════════════════════════════════════════════════════════

@@ -1,10 +1,10 @@
 """
-Full EKF MMM pipeline: optimize on the train split, run the filter +
+Full RBE MMM pipeline: optimize on the train split, run the filter +
 smoother on the full dataset, and assemble contributions / ROI / parameter
 tables for the Results tab.
 
 Two entry points:
-  - run_full_ekf_pipeline: single dependent variable (univariate EKF).
+  - run_full_ekf_pipeline: single dependent variable (univariate RBE).
   - run_multi_dependent_pipeline: one or two dependent variables. When a
     second dependent variable is configured, the two equations are fitted
     JOINTLY with a bivariate Kalman filter (shared time index, correlated
@@ -276,7 +276,7 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
     }
 
 
-# ── Single-dependent-variable pipeline (univariate EKF) ──────────────────────
+# ── Single-dependent-variable pipeline (univariate RBE) ──────────────────────
 
 def run_full_ekf_pipeline(df_full, config, max_iter, method, ng_cfg=None):
     g = _make_globals(config)

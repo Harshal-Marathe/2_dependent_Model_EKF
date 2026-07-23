@@ -1,5 +1,5 @@
 """
-EKF MMM Platform · Rainbrain 2 v8 — Main entry point.
+RBE MMM Platform · Rainbrain 2 v8 — Main entry point.
 
 Run with:  streamlit run app.py
 

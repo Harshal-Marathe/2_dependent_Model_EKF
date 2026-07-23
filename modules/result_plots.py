@@ -75,7 +75,7 @@ def render_fit_and_contrib(df, config, res, target, key_prefix=""):
     fig.add_trace(go.Scatter(x=x_axis, y=df[target].values,
                               name="Actual", line=dict(color="#1e40af", width=2)))
     fig.add_trace(go.Scatter(x=x_axis, y=res["yhat_smooth"],
-                              name="Fitted (EKF Smoothed)",
+                              name="Fitted (RBE Smoothed)",
                               line=dict(color="#f59e0b", width=2, dash="dash")))
     fig.update_layout(height=380, template="plotly_white",
                        title="Actual vs Fitted", legend=dict(orientation="h", y=1.15))

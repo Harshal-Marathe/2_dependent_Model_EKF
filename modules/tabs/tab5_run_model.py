@@ -1,5 +1,5 @@
 """
-Tab 6 — Run EKF Model: optimizer selection (L-BFGS-B / SLSQP / Nevergrad)
+Tab 6 — Run RBE Model: optimizer selection (L-BFGS-B / SLSQP / Nevergrad)
 and kicking off the full pipeline.
 """
 
@@ -10,7 +10,7 @@ from modules.pipeline import run_multi_dependent_pipeline
 
 
 def render_tab5(nevergrad_available: bool):
-    section("05", "Run EKF Model")
+    section("05", "Run RBE Model")
     if st.session_state.df is None:     need_data()
     if st.session_state.config is None: need_config()
 
@@ -130,10 +130,10 @@ def render_tab5(nevergrad_available: bool):
         col1, _ = st.columns(2)
         with col1: max_iter = st.number_input("Max iterations", 100, 5000, 800, 100)
 
-    if st.button("🚀 Run EKF MMM", type="primary", use_container_width=True):
+    if st.button("🚀 Run RBE MMM", type="primary", use_container_width=True):
         joint_mode = bool(config.get("enable_second_dependent") and config.get("target2"))
-        spinner_text = ("Running joint bivariate EKF optimisation… (60–600 s)"
-                         if joint_mode else "Running EKF optimisation… (30–300 s)")
+        spinner_text = ("Running joint bivariate RBE optimisation… (60–600 s)"
+                         if joint_mode else "Running RBE optimisation… (30–300 s)")
         with st.spinner(spinner_text):
             try:
                 results_1, results_2 = run_multi_dependent_pipeline(

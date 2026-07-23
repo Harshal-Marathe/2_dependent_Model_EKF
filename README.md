@@ -1,4 +1,4 @@
-# Rainbrain 2 v8 — EKF Marketing Mix Modeling Platform
+# Rainbrain 2 v8 — RBE Marketing Mix Modeling Platform
 
 Modularized version of the original single-file Streamlit app.
 
@@ -16,7 +16,7 @@ rainbrain_app/
     ├── ui_helpers.py             # section()/info()/safe_multiselect() etc.
     ├── transforms.py             # Hill saturation + adstock functions
     ├── params.py                 # _make_globals() / unpack_theta()
-    ├── kalman.py                  # EKF forward filter + RTS smoother
+    ├── kalman.py                  # RBE forward filter + RTS smoother
     ├── bounds.py                  # theta0 + per-channel bounds builder
     ├── optimizer.py               # Nevergrad multi-objective optimizer
     ├── pipeline.py                 # run_full_ekf_pipeline() — ties it all together

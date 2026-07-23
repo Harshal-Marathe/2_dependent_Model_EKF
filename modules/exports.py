@@ -238,7 +238,7 @@ def build_master_workbook_bytes(res, config, df_full):
             "competitor media this is the adstocked (carry-over adjusted) spend. "
             "For every other variable type, no transform is applied, so this "
             "equals Raw.",
-            "The EKF's smoothed, time-varying coefficient for that variable.",
+            "The RBE's smoothed, time-varying coefficient for that variable.",
             "Beta x Transformed for that variable and period — its modeled "
             "contribution to the target KPI in that period.",
             "Raw value of an intercept-effector channel (e.g. SEO spends, TV Grp) "

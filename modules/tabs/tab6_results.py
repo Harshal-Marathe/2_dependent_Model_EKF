@@ -381,9 +381,9 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
     fig_avp.add_trace(go.Scatter(x=x_axis, y=df[target].values,
                                   name="Actual", line=dict(color="#1e40af", width=2)))
     fig_avp.add_trace(go.Scatter(x=x_axis, y=res["yhat_smooth"],
-                                  name="EKF Smoothed", line=dict(color="#f59e0b", width=2, dash="dash")))
+                                  name="RBE Smoothed", line=dict(color="#f59e0b", width=2, dash="dash")))
     fig_avp.update_layout(height=460, template="plotly_white",
-                           title="Actual vs EKF Smoothed",
+                           title="Actual vs RBE Smoothed",
                            legend=dict(orientation="h", y=1.1))
     st.plotly_chart(fig_avp, use_container_width=True, key=f"{kp}fig_avp")
 

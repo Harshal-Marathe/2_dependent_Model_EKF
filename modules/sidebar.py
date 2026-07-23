@@ -8,7 +8,7 @@ import streamlit as st
 def render_sidebar(nevergrad_available: bool):
     with st.sidebar:
         st.markdown("## 📡 2 dependent model")
-        st.markdown("**Extended Kalman Filter**  \nMarketing Mix Modeling")
+        st.markdown("**Recursive Bayesian Estimation**  \nMarketing Mix Modeling")
         
         st.divider()
         steps = {
