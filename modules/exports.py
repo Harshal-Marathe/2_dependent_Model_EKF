@@ -1,5 +1,5 @@
 """
-Export helpers for Tab 6: builds downloadable artifacts directly from a
+Export helpers for Tab 7: builds downloadable artifacts directly from a
 fitted model's results — a betas-only time series, and a full Excel
 workbook structured as Raw Variables -> Transformed Variables -> Betas
 -> Contributions (Beta x Transformed), plus supporting sheets for
@@ -296,7 +296,7 @@ def build_full_results_zip_bytes(res, config, df_full, response_curve_images=Non
 
     response_curve_images: optional dict {filename: png_bytes} to drop into
     a response_curves/ folder inside the zip (built by the caller, e.g. one
-    PNG per media channel from Tab 6 · Section H).
+    PNG per media channel from Tab 7 · Section H).
     """
     betas_df = build_betas_df(res, df_full)
     param_df = res["param_df"]

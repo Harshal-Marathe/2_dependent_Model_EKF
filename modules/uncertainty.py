@@ -208,7 +208,7 @@ def run_seed_stability(df_full, config, max_iter, method, n_seeds=5,
     constraints — are identical every run; only theta0 moves), and report
     how much the fitted ROI / channel ranking moves across runs. Seed 0
     always uses the model's normal default starting point, so it matches
-    what Tab 5 / Tab 7 would produce.
+    what Tab 6 / Tab 8 would produce.
 
     A model whose ROI ranking is stable across seeds is one you can trust
     more; a lot of movement means the likelihood surface is flat or

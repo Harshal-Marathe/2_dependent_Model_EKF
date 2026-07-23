@@ -1,6 +1,6 @@
 """
-Shared per-channel hyperparameter bounds widget — used by Tab 4
-(Configuration, Dependent 1 & 2) and Tab 7 (Refine & Refit, for the bounds
+Shared per-channel hyperparameter bounds widget — used by Tab 5
+(Configuration, Dependent 1 & 2) and Tab 8 (Refine & Refit, for the bounds
 of a newly added or re-opened variable). Extracted so both tabs render the
 exact same widgets/keys/defaults instead of drifting apart.
 """

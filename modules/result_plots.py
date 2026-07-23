@@ -3,8 +3,8 @@ Shared result-rendering helpers.
 
 `render_fit_and_contrib()` draws an Actual-vs-Predicted chart plus a
 Short-term / Long-term / Both contribution summary for any fitted result
-dict (whatever produced it — Tab 5's run_full_ekf_pipeline or Tab 7's
-run_refit_pipeline — the shapes are identical). Used by Tab 7 so every
+dict (whatever produced it — Tab 6's run_full_ekf_pipeline or Tab 8's
+run_refit_pipeline — the shapes are identical). Used by Tab 8 so every
 refit immediately shows its own fit + contribution results, and could be
 reused anywhere else a "before/after" comparison is needed.
 """

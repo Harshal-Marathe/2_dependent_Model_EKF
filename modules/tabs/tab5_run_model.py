@@ -1,5 +1,5 @@
 """
-Tab 5 — Run EKF Model: optimizer selection (L-BFGS-B / SLSQP / Nevergrad)
+Tab 6 — Run EKF Model: optimizer selection (L-BFGS-B / SLSQP / Nevergrad)
 and kicking off the full pipeline.
 """
 
@@ -16,7 +16,7 @@ def render_tab5(nevergrad_available: bool):
 
     config = st.session_state.config
     if "media" not in config:
-        st.error("Configuration is incomplete — please re-save it in **Tab 4**.")
+        st.error("Configuration is incomplete — please re-save it in **Tab 5**.")
         st.stop()
 
     df = st.session_state.df
@@ -58,7 +58,7 @@ def render_tab5(nevergrad_available: bool):
     if missing_cols:
         st.error(
             f"❌ Columns in saved config are missing from dataset: "
-            f"`{'`, `'.join(missing_cols)}`. Re-save configuration in Tab 4."
+            f"`{'`, `'.join(missing_cols)}`. Re-save configuration in Tab 5."
         )
         st.stop()
 
@@ -187,5 +187,5 @@ def render_tab5(nevergrad_available: bool):
                            f"φ₁ (Dep2→Dep1) = {res2['phi1']:.3f} · φ₂ (Dep1→Dep2) = {res2['phi2']:.3f} · "
                            f"joint log-lik = {res2['joint_loglik']:.2f}")
 
-        st.caption("Proceed to **Tab 6** for full results. Use the selector there to "
+        st.caption("Proceed to **Tab 7** for full results. Use the selector there to "
                    "switch between Dependent 1 and Dependent 2.")

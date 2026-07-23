@@ -17,6 +17,7 @@ from modules.sidebar import render_sidebar
 
 from modules.tabs.tab1_data_upload import render_tab1
 from modules.tabs.tab2_prophet import render_tab2
+from modules.tabs.tab_eda import render_tab_eda
 from modules.tabs.tab3_correlation import render_tab3
 from modules.tabs.tab4_configuration import render_tab4
 from modules.tabs.tab5_run_model import render_tab5
@@ -38,10 +39,10 @@ render_sidebar(NEVERGRAD_AVAILABLE)
 # ════════════════════════════════════════════════════════════════════
 # TABS
 # ════════════════════════════════════════════════════════════════════
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
-    "1 · Data Upload", "2 · Prophet Decomp", "3 · Correlation & Synergy",
-    "4 · Configuration", "5 · Run Model", "6 · Results & ROI",
-    "7 · Refine & Refit",
+tab1, tab2, tab_eda, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "1 · Data Upload", "2 · Prophet Decomp", "3 · EDA",
+    "4 · Correlation & Synergy", "5 · Configuration", "6 · Run Model",
+    "7 · Results & ROI", "8 · Refine & Refit",
 ])
 
 with tab1:
@@ -49,6 +50,9 @@ with tab1:
 
 with tab2:
     render_tab2(PROPHET_AVAILABLE, HOLIDAYS_AVAILABLE)
+
+with tab_eda:
+    render_tab_eda()
 
 with tab3:
     render_tab3()

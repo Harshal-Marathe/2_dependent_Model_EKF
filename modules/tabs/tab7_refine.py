@@ -1,5 +1,5 @@
 """
-Tab 7 — Refine & Refit: after the model in Tab 5 is fitted and saved,
+Tab 8 — Refine & Refit: after the model in Tab 6 is fitted and saved,
 iteratively (a) add a new variable with its own bounds, and/or (b) reopen
 an existing variable's bounds for adjustment — then refit. Everything
 already fitted keeps its previous parameter values (frozen) unless you
@@ -30,7 +30,7 @@ def _init_refit_state():
         st.session_state.refit_config = copy.deepcopy(st.session_state.config)
         st.session_state.refit_result = st.session_state.model_results
         st.session_state.refit_history = [{
-            "Step": 0, "Action": "Baseline (Tab 5 fit)", "Variable": "—",
+            "Step": 0, "Action": "Baseline (Tab 6 fit)", "Variable": "—",
             "MAPE": st.session_state.model_results["mape"],
             "R²": st.session_state.model_results["r2"],
         }]
@@ -40,7 +40,7 @@ def _reset_refit_state():
     st.session_state.refit_config = copy.deepcopy(st.session_state.config)
     st.session_state.refit_result = st.session_state.model_results
     st.session_state.refit_history = [{
-        "Step": 0, "Action": "Baseline (Tab 5 fit)", "Variable": "—",
+        "Step": 0, "Action": "Baseline (Tab 6 fit)", "Variable": "—",
         "MAPE": st.session_state.model_results["mape"],
         "R²": st.session_state.model_results["r2"],
     }]
@@ -101,19 +101,19 @@ def render_tab7():
     if not st.session_state.model_fitted: need_model()
 
     info(
-        "Fit the baseline model in <b>Tab 5</b> first. Here you can <b>add a new "
+        "Fit the baseline model in <b>Tab 6</b> first. Here you can <b>add a new "
         "variable</b> with its own bounds, or <b>reopen an existing variable's "
         "bounds</b> for adjustment, then refit. Anything already fitted that you "
         "don't touch keeps <b>exactly the same parameter values</b> — only the "
         "new/reopened variable(s) are actually re-optimized, starting from the "
         "bounds you set for them. Every refit's <b>Actual vs Predicted</b> and "
         "<b>Short/Long-term contribution</b> results are shown below as soon as "
-        "it completes. When you're happy with a refit, go to <b>Tab 6</b> to "
+        "it completes. When you're happy with a refit, go to <b>Tab 7</b> to "
         "save it as the official model."
     )
     if st.session_state.config.get("enable_second_dependent") and st.session_state.config.get("target2"):
         st.warning(
-            "⚠️ A second dependent variable is configured, but Tab 7 currently "
+            "⚠️ A second dependent variable is configured, but Tab 8 currently "
             "refines **Dependent 1 only** (the joint bivariate fit is not "
             "warm-startable yet). Refits here won't touch Dependent 2."
         )
@@ -136,18 +136,18 @@ def render_tab7():
         hist_df = pd.DataFrame(st.session_state.refit_history)
         st.dataframe(hist_df, use_container_width=True, hide_index=True)
 
-    if st.button("↩️ Reset — discard all refinements, start over from Tab 5 fit"):
+    if st.button("↩️ Reset — discard all refinements, start over from Tab 6 fit"):
         _reset_refit_state()
         st.rerun()
 
     if st.session_state.get("refit_last_message"):
         st.success(st.session_state.pop("refit_last_message"))
 
-    with st.expander("📈 Current Working Model — Full Results & ROI Analytics (same as Tab 6)",
+    with st.expander("📈 Current Working Model — Full Results & ROI Analytics (same as Tab 7)",
                       expanded=True):
         st.caption(
             "Everything below reflects the **current working (refit) model** — "
-            "identical sections and download buttons to Tab 6, so you don't need "
+            "identical sections and download buttons to Tab 7, so you don't need "
             "to switch tabs to review or export a refit before deciding whether "
             "to save it as the official model."
         )
@@ -278,7 +278,7 @@ def render_tab7():
 
     st.divider()
 
-    # ── Section C: parameter table (saving now happens in Tab 6) ─────
+    # ── Section C: parameter table (saving now happens in Tab 7) ─────
     st.markdown("### C · Current Parameter Table")
     with st.expander("📋 Current parameter table", expanded=False):
         st.dataframe(refit_result["param_df"], use_container_width=True, hide_index=True)
@@ -287,6 +287,6 @@ def render_tab7():
             "refit_parameters.csv", "text/csv", key="refit_param_dl",
         )
     st.info(
-        "➡️ Head to **Tab 6 · Results & ROI Analytics** to compare this refined "
-        "model against the Tab 5 baseline and **save it as the official model**."
+        "➡️ Head to **Tab 7 · Results & ROI Analytics** to compare this refined "
+        "model against the Tab 6 baseline and **save it as the official model**."
     )

@@ -38,10 +38,10 @@ def _make_globals(cfg: dict):
     # ── Media input type (Spend vs GRP/Impressions) ──────────────────
     # A channel whose raw values are GRP/impressions (not currency) can't
     # have its own column summed as "total spend" for ROI — instead it is
-    # mapped, in Tab 4 · Section D2 (or Tab 7's per-channel bounds widget),
+    # mapped, in Tab 5 · Section D2 (or Tab 8's per-channel bounds widget),
     # to the actual spend column whose total should be used as the ROI
     # denominator. Stored inline in per_channel_bounds[col]["__spend_col__"]
-    # so it always travels with that channel's bounds (Tab 4 save, Tab 7
+    # so it always travels with that channel's bounds (Tab 5 save, Tab 8
     # add-variable / bound-adjustment) without a second config key to keep
     # in sync. See modules/bounds_ui.py and modules/pipeline.py's ROI table.
     g["MEDIA_SPEND_MAP"] = {

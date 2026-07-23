@@ -153,7 +153,7 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
     # ROI denominator: for a channel whose raw input is GRP/impressions
     # (not currency), summing that column itself is meaningless as
     # "spend". MEDIA_SPEND_MAP (built in modules/params.py from
-    # per_channel_bounds[col]["__spend_col__"], set in Tab 4 · D2 / Tab 7)
+    # per_channel_bounds[col]["__spend_col__"], set in Tab 5 · D2 / Tab 8)
     # maps such a channel to its real spend column, whose TOTAL is used
     # as the ROI denominator instead. Channels left as "Spend" (the
     # default) fall back to summing themselves, unchanged from before.
@@ -369,7 +369,7 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     # backward-compatible with older saved configs that have no _2 keys),
     # or use its own independently-selected — and potentially overlapping —
     # set of media / non-media / price / competitor variables, configured
-    # in Tab 4 · Section A3.
+    # in Tab 5 · Section A3.
     config_1 = dict(config)
     config_2 = dict(config)
     config_2["target"]          = target2

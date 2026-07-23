@@ -5,9 +5,9 @@ fitted (so the original model's behaviour doesn't change) while a newly
 added variable (or a variable the user explicitly chose to re-open) is
 fitted fresh within the bounds supplied for it.
 
-This is what powers Tab 7 · Refine & Refit:
-  1. Fit a baseline model in Tab 5 (saved automatically).
-  2. In Tab 7, add a new variable with its own bounds, and/or reopen an
+This is what powers Tab 8 · Refine & Refit:
+  1. Fit a baseline model in Tab 6 (saved automatically).
+  2. In Tab 8, add a new variable with its own bounds, and/or reopen an
      existing variable's bounds for adjustment.
   3. Refit — parameters belonging to variables that were already in the
      model and were NOT reopened keep their previous fitted value (frozen,
@@ -347,7 +347,7 @@ def run_refit_pipeline(df_full, new_config, prev_result, max_iter, method,
     Fit `new_config` warm-started from `prev_result` (a result dict from
     run_full_ekf_pipeline / a previous call to this function — has "params"
     and "g" keys). Returns a result dict shaped exactly like
-    run_full_ekf_pipeline's, so it can be dropped straight into Tab 6.
+    run_full_ekf_pipeline's, so it can be dropped straight into Tab 7.
 
     `manual_overrides`: {col: {block_name: value}} — pins those specific
     parameters to an exact value (no searching) regardless of everything

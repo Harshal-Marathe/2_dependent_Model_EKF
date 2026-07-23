@@ -1,5 +1,5 @@
 """
-Tab 3 — Correlation & Synergy Analysis.
+Tab 4 — Correlation & Synergy Analysis.
 """
 
 import numpy as np

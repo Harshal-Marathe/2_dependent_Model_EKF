@@ -1,5 +1,5 @@
 """
-Tab 4 — Model Configuration: variable roles, positive-beta constraints,
+Tab 5 — Model Configuration: variable roles, positive-beta constraints,
 cross-media learning, adstock type, transformation type, lag count,
 per-variable hyperparameter bounds, train/test split, and saving config.
 """
@@ -107,7 +107,7 @@ def render_tab4():
                 f"non-media · {len(price_vars)} price · {len(comp_media)} comp-media · "
                 f"{len(comp_nonmedia)} comp-non-media, and the same adstock/transform "
                 f"choices set in Section D below. Dependent 1 and Dependent 2 will be "
-                f"fitted **jointly** in Tab 5 with a bivariate Kalman filter "
+                f"fitted **jointly** in Tab 6 with a bivariate Kalman filter "
                 f"(shared time index, correlated errors) — not as two separate models."
             )
         else:
@@ -493,7 +493,7 @@ def render_tab4():
 
     st.divider()
 
-    # Per-variable hyperparameter bounds widget (shared with Tab 7 · Refine & Refit)
+    # Per-variable hyperparameter bounds widget (shared with Tab 8 · Refine & Refit)
     _render_per_channel_bounds = render_per_channel_bounds
 
     # ── D2. Per-Variable Hyperparameter Bounds — Dependent 1 ─────────
@@ -673,7 +673,7 @@ def render_tab4():
             if st.session_state.config["enable_second_dependent"]:
                 st.success(
                     f"➕ Second dependent variable enabled: **{target2}** — will be "
-                    f"fitted **jointly** with **{target}** in Tab 5 using a bivariate "
+                    f"fitted **jointly** with **{target}** in Tab 6 using a bivariate "
                     f"Kalman filter (shared predictors x_t, correlated errors)."
                 )
                 if different_predictors_2:

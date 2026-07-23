@@ -21,7 +21,7 @@ def render_tab2(prophet_available: bool, holidays_available: bool):
     num_cols = df.select_dtypes(include=np.number).columns.tolist()
     info("Prophet extracts <b>trend</b>, <b>seasonality</b>, and <b>holiday effects</b>. "
          "After fitting, click <b>Add prophet components to dataset</b> — those columns "
-         "will then appear in <b>Tab 3</b> and <b>Tab 4</b> immediately.")
+         "will then appear in <b>Tab 4</b> and <b>Tab 5</b> immediately.")
 
     col1, col2, col3 = st.columns(3)
     with col1: p_target = st.selectbox("🎯 Dependent variable", num_cols, key="p_target")
@@ -147,7 +147,7 @@ def render_tab2(prophet_available: bool, holidays_available: bool):
         info(
             "Clicking this merges <code>prophet_trend</code>, <code>prophet_yearly</code>, etc. "
             "into the working dataset. They will <b>immediately appear</b> in "
-            "<b>Tab 3 (Correlation)</b> and <b>Tab 4 (Non-media controls)</b> on the next render."
+            "<b>Tab 4 (Correlation)</b> and <b>Tab 5 (Non-media controls)</b> on the next render."
         )
 
         already = st.session_state.prophet_cols_added
@@ -201,7 +201,7 @@ def render_tab2(prophet_available: bool, holidays_available: bool):
                 # ── Pre-seed widget session-state keys BEFORE rerun ──
                 # This still helps the very next render. The durable
                 # protection across ALL future reruns comes from
-                # safe_multiselect() in Tab 3 / Tab 4, which sanitizes
+                # safe_multiselect() in Tab 4 / Tab 5, which sanitizes
                 # against current options on every single run.
                 all_numeric_after = merged.select_dtypes(include=np.number).columns.tolist()
                 st.session_state["corr_vars"] = all_numeric_after
@@ -223,7 +223,7 @@ def render_tab2(prophet_available: bool, holidays_available: bool):
                     f"✅ Added {len(new_col_names)} prophet column(s): "
                     f"`{'`, `'.join(new_col_names)}` — "
                     f"dataset now has **{merged.shape[1]}** columns. "
-                    f"Switching to Tab 3 or Tab 4 will show them immediately."
+                    f"Switching to Tab 4 or Tab 5 will show them immediately."
                 )
 
                 # Verify merge quality

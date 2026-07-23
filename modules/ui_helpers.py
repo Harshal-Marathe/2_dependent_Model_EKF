@@ -55,11 +55,11 @@ def need_data():
 
 
 def need_config():
-    st.warning("⚙️ Configure the model in **Step 4** first."); st.stop()
+    st.warning("⚙️ Configure the model in **Step 5** first."); st.stop()
 
 
 def need_model():
-    st.warning("🚀 Run the EKF model in **Step 5** first."); st.stop()
+    st.warning("🚀 Run the EKF model in **Step 6** first."); st.stop()
 
 
 # ════════════════════════════════════════════════════════════════════

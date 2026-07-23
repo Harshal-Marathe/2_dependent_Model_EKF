@@ -18,7 +18,7 @@ def render_tab1():
         # Tab 1 is visible — that's how Streamlit tabs work. Since the
         # file stays inside the uploader widget across reruns, `if
         # uploaded:` was True on every single interaction anywhere in
-        # the app (e.g. picking a media channel in Tab 4), which kept
+        # the app (e.g. picking a media channel in Tab 5), which kept
         # re-deleting cfg_media / corr_vars / etc. below — resetting
         # the user's selection instantly, every time.
         #
@@ -34,7 +34,7 @@ def render_tab1():
                       else pd.read_excel(uploaded))
             st.session_state.df = df_raw
             st.session_state.prophet_cols_added = []
-            # Clear any stale widget states so Tab 3/4 rebuild cleanly with new data.
+            # Clear any stale widget states so Tab 4/4 rebuild cleanly with new data.
             # (safe_multiselect would handle this gracefully even without the clear,
             # but clearing avoids confusing leftover selections from a previous file.)
             for key in ["corr_vars", "cfg_nonmedia", "cfg_media", "cfg_price",

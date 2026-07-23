@@ -1,15 +1,15 @@
 """
-Tab 6 — Results & ROI Analytics: performance metrics, fit charts,
+Tab 7 — Results & ROI Analytics: performance metrics, fit charts,
 residual diagnostics, channel contributions, ROI, parameters, and
 interactive response curves.
 
 `render_full_results()` is the reusable results body used by both this
-tab and Tab 7 · Refine & Refit, so a refit in Tab 7 shows exactly the
+tab and Tab 8 · Refine & Refit, so a refit in Tab 8 shows exactly the
 same charts/tables and the same download options as the officially
 saved model here — see modules/tabs/tab7_refine.py. Because both tabs
 render in the same Streamlit script run (st.tabs, not separate pages),
 every interactive/download widget inside render_full_results() is keyed
-with the caller's key_prefix so Tab 6's and Tab 7's copies never collide.
+with the caller's key_prefix so Tab 7's and Tab 8's copies never collide.
 """
 
 import numpy as np
@@ -19,16 +19,16 @@ import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
-from modules.ui_helpers import section, need_model
+from modules.ui_helpers import section, need_model, safe_multiselect
 from modules.transforms import hill_transform, power_transform, apply_transformation
 from modules.exports import build_betas_df, build_master_workbook_bytes, build_full_results_zip_bytes
 
 
 def _render_tab7_promote_section():
-    """If Tab 7 · Refine & Refit has produced a working model that differs
+    """If Tab 8 · Refine & Refit has produced a working model that differs
     from the currently-saved official model, surface a compare-and-save
     panel here so the whole 'refit → review → save' loop lives in one
-    place: refits happen in Tab 7, saving happens here in Tab 6."""
+    place: refits happen in Tab 8, saving happens here in Tab 7."""
     refit_result = st.session_state.get("refit_result")
     refit_config = st.session_state.get("refit_config")
     if refit_result is None or refit_config is None:
@@ -40,17 +40,17 @@ def _render_tab7_promote_section():
 
     already_saved = refit_result is st.session_state.model_results
     with st.container(border=True):
-        st.markdown("### 🔧 Refined Model Available (from Tab 7 · Refine & Refit)")
+        st.markdown("### 🔧 Refined Model Available (from Tab 8 · Refine & Refit)")
         base_mape = st.session_state.model_results["mape"]
         base_r2   = st.session_state.model_results["r2"]
         dc1, dc2, dc3, dc4 = st.columns(4)
-        dc1.metric("Tab 5 baseline MAPE", f"{base_mape:.2%}")
+        dc1.metric("Tab 6 baseline MAPE", f"{base_mape:.2%}")
         dc2.metric("Refined MAPE", f"{refit_result['mape']:.2%}",
                    delta=f"{(base_mape - refit_result['mape'])*100:+.2f} pp (lower is better)")
-        dc3.metric("Tab 5 baseline R²", f"{base_r2:.4f}")
+        dc3.metric("Tab 6 baseline R²", f"{base_r2:.4f}")
         dc4.metric("Refined R²", f"{refit_result['r2']:.4f}",
                    delta=f"{refit_result['r2']-base_r2:+.4f}")
-        st.caption(f"{steps_taken} refinement step(s) taken in Tab 7.")
+        st.caption(f"{steps_taken} refinement step(s) taken in Tab 8.")
 
         if already_saved:
             st.success("✅ This refined model is already saved and is what's shown below.")
@@ -100,6 +100,170 @@ def _contribution_table(totals, prefix):
     }).sort_values("Total Contrib", ascending=False).reset_index(drop=True)
     df_out.insert(0, "Rank", range(1, len(df_out)+1))
     return df_out, pos_sum, neg_sum
+
+
+def _render_spend_settings(kp, g, df_full):
+    """
+    Shared 'Spend Basis' control used by BOTH the Efficiency Index (Section E)
+    and ROI Analytics (Section G).
+
+    Why this exists: models are often built on spends that were pre-scaled
+    into Lakhs/Crores (or any other unit) before being fed to the optimizer.
+    Contributions come out of the model in the *target's* native unit
+    regardless, so dividing a native-unit contribution by a Lakhs/Crores
+    spend number silently produces a wrong ROI/EI. This lets the user type
+    the multiplier that converts the modeled spend unit back to the
+    original unit (e.g. modeled in Lakhs -> type 100000; modeled in
+    Crores -> type 10000000) and every spend-based number below is
+    rescaled consistently.
+
+    Returns:
+        rescale_factor (float): multiplier applied to every spend total.
+        excluded_media (list[str]): own media channels to LEAVE OUT of the
+            spend-proportion pool (e.g. a channel that's really GRPs/organic/
+            a non-spend metric, not an actual spend number).
+        promo_cols (list[str]): the OWN non-media columns the user has
+            flagged as "promotional spend" — these are added to own media
+            spend when building the Efficiency Index's spend-proportion
+            denominator (Section E). Competitor variables are NEVER
+            included, per spec.
+    """
+    with st.expander("💱 Spend Basis Settings (used by Efficiency Index & ROI below)", expanded=False):
+        st.caption(
+            "If channel spends were modeled in a scaled unit (Lakhs, Crores, "
+            "'000s, etc.), enter the multiplier that converts them back to "
+            "the original unit. This is applied to every spend total used "
+            "for **EI** (Section E) and **ROI** (Section G) below — it does "
+            "**not** change contributions, which already come out of the "
+            "model in the target's native unit."
+        )
+        sc1, sc2 = st.columns([1, 1.4])
+        with sc1:
+            preset = st.selectbox(
+                "Modeled spend unit",
+                ["Already in original unit (×1)", "Lakhs (×1,00,000)",
+                 "Crores (×1,00,00,000)", "Custom multiplier"],
+                key=f"{kp}rescale_preset",
+            )
+        preset_map = {
+            "Already in original unit (×1)": 1.0,
+            "Lakhs (×1,00,000)": 100000.0,
+            "Crores (×1,00,00,000)": 10000000.0,
+        }
+        with sc2:
+            if preset == "Custom multiplier":
+                rescale_factor = st.number_input(
+                    "Multiplier (e.g. type 100000 to convert Lakhs → original)",
+                    min_value=0.0, value=1.0, step=1.0, format="%.4f",
+                    key=f"{kp}rescale_custom",
+                )
+            else:
+                rescale_factor = preset_map[preset]
+                st.metric("Multiplier applied", f"×{rescale_factor:,.0f}")
+        if rescale_factor is None or rescale_factor <= 0:
+            rescale_factor = 1.0
+
+        st.divider()
+        media_spend_map = g.get("MEDIA_SPEND_MAP", {})
+        media_cols_all = g.get("MEDIA_COLS", [])
+        grp_mapped_channels = [c for c in media_cols_all if c in media_spend_map]
+
+        st.caption(
+            "**Spend-proportion pool for EI:** own media channels are included "
+            "by default. Untick any that are NOT a real spend number and have "
+            "**no mapped spend column** (e.g. raw GRPs/impressions with nothing "
+            "configured) — they'll be dropped from the spend pool entirely "
+            "(no EI/ROI for them), and won't distort other channels' spend "
+            "share either. Channels configured in **Tab 5 · Configuration** as "
+            "GRP / Impressions mapped to a spend column are always kept in the "
+            "pool automatically (below) — that mapped column's total is used "
+            "for them instead of the raw GRP/impression numbers, so unticking "
+            "them here isn't needed and isn't possible."
+        )
+        if grp_mapped_channels:
+            mapped_list = ", ".join(f"**{c}** → `{media_spend_map[c]}`" for c in grp_mapped_channels)
+            st.caption(f"📡 GRP/Impressions channels auto-included via their mapped spend column: {mapped_list}")
+
+        excluded_media = []
+        if media_cols_all:
+            included_media = safe_multiselect(
+                "Own media channels to INCLUDE as spend in the EI pool",
+                options=media_cols_all,
+                default=list(media_cols_all),
+                require=grp_mapped_channels,
+                key=f"{kp}media_spend_include",
+            )
+            excluded_media = [c for c in media_cols_all if c not in included_media]
+
+        own_nonmedia = g.get("OWN_NONMEDIA_COLS", [])
+        promo_cols = []
+        if own_nonmedia:
+            promo_cols = st.multiselect(
+                "Which own non-media variable(s) are **promotional spend** "
+                "(to include alongside own media spend in the Efficiency "
+                "Index's spend base)? Competitor variables are excluded "
+                "automatically.",
+                own_nonmedia, default=[], key=f"{kp}promo_cols",
+            )
+        else:
+            st.caption("No own non-media variables configured — EI will be based on own media spend only.")
+    return rescale_factor, excluded_media, promo_cols
+
+
+def _add_efficiency_index(df_st, g, df_full, rescale_factor, excluded_media, promo_cols):
+    """
+    Adds EI (Efficiency Index) and ROI columns to the Short-Term
+    Contribution Summary table — computed ONLY for "own" spend-bearing
+    variables: own media channels (g['MEDIA_COLS'], minus any the user
+    excluded as non-spend) plus whichever own non-media columns were
+    flagged as promotional spend. Competitor media/non-media, price, the
+    intercept, and any excluded media are left blank since they're not
+    part of the spend pool.
+
+        EI  = Contribution Share (%) / Spend Share (%)
+              where Spend Share (%) is that variable's share of the
+              OWN-spend pool only (own media (minus exclusions) + flagged
+              promo spend) — never competitor spend.
+        ROI = Total Contrib / Rescaled Spend
+    """
+    media_cols = [c for c in g.get("MEDIA_COLS", []) if c not in (excluded_media or [])]
+    media_spend_map = g.get("MEDIA_SPEND_MAP", {})
+    own_vars = media_cols + [c for c in promo_cols if c not in media_cols]
+
+    rescaled_spend = {}
+    for col in own_vars:
+        if col in media_cols:
+            spend_col = media_spend_map.get(col, col)
+            if spend_col not in df_full.columns:
+                spend_col = col
+        else:
+            spend_col = col
+        raw = float(df_full[spend_col].sum()) if spend_col in df_full.columns else 0.0
+        rescaled_spend[col] = raw * rescale_factor
+
+    total_own_spend = sum(rescaled_spend.values())
+
+    ei_vals, roi_vals, spend_share_vals = [], [], []
+    for _, row in df_st.iterrows():
+        ch = row["Channel"]
+        if ch in own_vars and total_own_spend > 1e-12:
+            sp = rescaled_spend[ch]
+            spend_share = sp / total_own_spend * 100
+            ei = row["Share (%)"] / spend_share if spend_share > 1e-9 else np.nan
+            roi = row["Total Contrib"] / sp if sp > 1e-9 else np.nan
+            spend_share_vals.append(round(spend_share, 2))
+            ei_vals.append(round(ei, 3) if pd.notna(ei) else np.nan)
+            roi_vals.append(round(roi, 4) if pd.notna(roi) else np.nan)
+        else:
+            spend_share_vals.append(np.nan)
+            ei_vals.append(np.nan)
+            roi_vals.append(np.nan)
+
+    df_out = df_st.copy()
+    df_out["Spend Share (%)"] = spend_share_vals
+    df_out["EI"] = ei_vals
+    df_out["ROI"] = roi_vals
+    return df_out, rescaled_spend, total_own_spend
 
 
 def _make_response_curve_fig(sel, idx, df, res, g, params, x_max_pct=150,
@@ -190,13 +354,13 @@ def _make_response_curve_fig(sel, idx, df, res, g, params, x_max_pct=150,
 
 def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_channel_bounds"):
     """The full Results & ROI Analytics body (sections A-I). Called by
-    Tab 6 for the officially-saved model, and by Tab 7 after every refit
+    Tab 7 for the officially-saved model, and by Tab 8 after every refit
     so refits get identical charts, tables and download buttons without
-    having to open Tab 6.
+    having to open Tab 7.
 
     pcb_key: which config key holds this result's per-channel bounds —
     "per_channel_bounds" for Dependent 1 (the default, and the only one
-    Tab 7 refits), "per_channel_bounds_2" when Tab 6 is showing Dependent 2.
+    Tab 8 refits), "per_channel_bounds_2" when Tab 7 is showing Dependent 2.
     """
     g = res["g"]
     kp = key_prefix
@@ -255,11 +419,33 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
     totals_st  = contrib_df[short_cols].sum()
     totals_lt  = contrib_df[long_cols].sum()
 
+    rescale_factor, excluded_media, promo_cols = _render_spend_settings(kp, g, df)
+
     t1, t2 = st.columns(2)
     with t1:
         st.markdown("#### Short-Term Contribution Summary")
         df_st, pos_st, neg_st = _contribution_table(totals_st, "ShortTerm_")
-        st.dataframe(df_st, use_container_width=True, hide_index=True, key=f"{kp}df_st")
+        df_st_ei, rescaled_spend, total_own_spend = _add_efficiency_index(
+            df_st, g, df, rescale_factor, excluded_media, promo_cols)
+        st.dataframe(
+            df_st_ei.style.format({
+                "Total Contrib":   "{:,.2f}",
+                "Share (%)":       "{:.1f}",
+                "Spend Share (%)": "{:.2f}",
+                "EI":              "{:.3f}",
+                "ROI":             "{:.4f}",
+            }, na_rep="—"),
+            use_container_width=True, hide_index=True, key=f"{kp}df_st",
+        )
+        st.caption(
+            "**EI (Efficiency Index)** = Contribution Share (%) ÷ Spend Share (%), "
+            "computed only for **own** variables (own media + any flagged "
+            "promotional spend) — EI > 1 means a variable is punching above its "
+            "spend weight, EI < 1 means below. Competitor/price/intercept rows "
+            "show **—** since they have no spend to divide by. "
+            f"Own-spend pool used: **{total_own_spend:,.2f}** "
+            f"(rescale ×{rescale_factor:,.0f})."
+        )
         check_st = pos_st + neg_st
         c1s, c2s, c3s = st.columns(3)
         c1s.metric("Positive pool", f"{pos_st:,.2f}")
@@ -312,7 +498,7 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
         fig_syn.update_layout(height=max(300, 45*len(synergy_cols)), template="plotly_white")
         st.plotly_chart(fig_syn, use_container_width=True, key=f"{kp}fig_syn_summary")
     else:
-        st.caption("No cross-media synergy pairs were configured in Tab 4 · Section C.")
+        st.caption("No cross-media synergy pairs were configured in Tab 5 · Section C.")
 
     with st.expander("📊 Pie Charts — Positive Contributions Only", expanded=False):
         st.caption(
@@ -373,7 +559,7 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
     if synergy_df is None or synergy_df.empty or not synergy_cols:
         st.info(
             "No cross-media synergy relationships are configured for this model. "
-            "Set them up in **Tab 4 · Section C (Cross-media Learning)** and re-run."
+            "Set them up in **Tab 5 · Section C (Cross-media Learning)** and re-run."
         )
     else:
         st.caption(
@@ -429,11 +615,23 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
     st.markdown("### G · ROI Analytics")
     roi_df = res["roi_df"]
     if not roi_df.empty:
+        roi_df = roi_df.copy()
+        roi_df["TotalSpend"] = roi_df["TotalSpend"] * rescale_factor
+        roi_df["ROI"] = np.where(
+            roi_df["TotalSpend"] > 1e-9,
+            roi_df["TotalContrib"] / roi_df["TotalSpend"], 0.0,
+        )
+        if rescale_factor != 1:
+            st.caption(
+                f"💱 Spend rescale of **×{rescale_factor:,.0f}** from the "
+                f"**Spend Basis Settings** panel above has been applied to "
+                f"TotalSpend and ROI below."
+            )
         n_grp = int((roi_df.get("InputType", pd.Series(dtype=str)) == "GRP/Impressions").sum())
         if n_grp:
             st.caption(
                 f"💡 {n_grp} channel(s) are configured as **GRP / Impressions** in "
-                f"Tab 4 · D2 (or Tab 7) — their ROI uses their mapped **spend column's** "
+                f"Tab 5 · D2 (or Tab 8) — their ROI uses their mapped **spend column's** "
                 f"total instead of summing the channel itself. See the **SpendColumn** "
                 f"column below."
             )
