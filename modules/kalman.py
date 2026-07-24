@@ -36,8 +36,20 @@ Weibull + Hill:
   of this lag sum — it only enters via the δ_i·f(x_i,t) shock term above:
     w_l = (k/λ) · (l/λ)^(k−1) · exp( −(l/λ)^k )
 
-Intercept (all modes):
-  I_t = G0 · I_{t-1}  +  Σ_k γ_k · media_k,t^{n_k_intercept}
+Intercept (all modes) — Power or Hill, chosen independently of the media
+Transform Type above via config "intercept_transform_type":
+
+  Power (default):
+    I_t = G0 · I_{t-1}  +  Σ_k γ_k · media_k,t^{n_k_intercept}
+
+  Hill:
+    I_t = G0 · I_{t-1}  +  Σ_k γ_k ·
+              media_k,t^{n_k_intercept} /
+              ( media_k,t^{n_k_intercept} + S_k_intercept^{n_k_intercept} )
+
+  Every intercept-effector column — whether or not it is also a media
+  channel with its own beta — is transformed the same way, with its own
+  independently-fitted n_k_intercept (and S_k_intercept, Hill only).
 
 ──────────────────────────────────────────────────────────────────────────
 Joint (bivariate) Kalman-filter fit
@@ -398,16 +410,24 @@ def _prepare_equation(df, g, params, static_cache=None):
         transformed_cross[:, k] = hill_transform_vec(
             src_series, params["cross_n"][k], params["cross_S"][k])
 
-    # Intercept boosts: I_t += Σ γ_k · media_k,t^{n_k_intercept}
+    # Intercept boosts — Power or Hill per INTERCEPT_TRANSFORM_TYPE (set
+    # independently of the media betas' own TRANSFORM_TYPE above):
+    #   Power: I_t += Σ γ_k · media_k,t^{n_k_intercept}
+    #   Hill:  I_t += Σ γ_k · media_k,t^{n_k_intercept} /
+    #                     (media_k,t^{n_k_intercept} + S_k_intercept^{n_k_intercept})
+    # Applies uniformly to every intercept effector, whether or not it is
+    # also a media channel — each gets its own independently-fitted
+    # n_intercept (and S_intercept, Hill only), never the media beta's.
+    INTERCEPT_TRANSFORM_TYPE = g.get("INTERCEPT_TRANSFORM_TYPE", "power")
     intercept_boost = np.zeros(T_len)
     for k, col in enumerate(g["INTERCEPT_EFFECTORS"]):
+        if col not in df.columns:
+            continue
         ni_int = params["n_intercept"][k]
-        if col in MEDIA_COLS:
-            raw = df[col].values.astype(float)
-            intercept_boost += params["gamma"][k] * _transform_media(
-                raw, TRANSFORM_TYPE, ni_int, params["S_params"][MEDIA_COLS.index(col)])
-        elif col in df.columns:
-            intercept_boost += params["gamma"][k] * df[col].values.astype(float)
+        si_int = params["S_intercept"][k]
+        raw = df[col].values.astype(float)
+        intercept_boost += params["gamma"][k] * _transform_media(
+            raw, INTERCEPT_TRANSFORM_TYPE, ni_int, si_int)
 
     # Weibull weighted-lag arrays for state transition
     weibull_lagsum_own = (

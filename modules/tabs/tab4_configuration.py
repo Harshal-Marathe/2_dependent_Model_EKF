@@ -378,11 +378,32 @@ def render_tab4():
         )
         use_hill = transform_choice.startswith("Hill")
 
+        st.markdown("#### Intercept Transformation")
+        intercept_transform_choice = st.radio(
+            "Intercept transform type",
+            ["Power (diminishing returns)", "Hill (S-curve saturation)"],
+            horizontal=False,
+            key="intercept_transform_type_radio",
+            help=(
+                "Independent of the media Transformation above — this only "
+                "controls how each intercept-effector's boost into the "
+                "baseline is shaped.\n\n"
+                "**Power**: γ_k · media_k,t^n_k_intercept. "
+                "Unbounded diminishing-returns curve, n ∈ (0,1].\n\n"
+                "**Hill**: γ_k · media_k,t^n_k_intercept / "
+                "(media_k,t^n_k_intercept + S_k_intercept^n_k_intercept). "
+                "Bounded 0-1 S-curve with its own half-saturation "
+                "S_k_intercept per effector, n ∈ [1,15]."
+            ),
+        )
+        use_hill_intercept = intercept_transform_choice.startswith("Hill")
+
     # Summary box showing the active state equation
     adstock_label = "Delayed (Weibull)" if use_weibull else "Instant (λ)"
     transform_label = "Hill(x; n, S)" if use_hill else "x^n"
     transform_type_str = "hill" if use_hill else "power"
     adstock_type_str   = "weibull" if use_weibull else "instant"
+    intercept_transform_type_str = "hill" if use_hill_intercept else "power"
 
     if use_weibull and use_hill:
         eq_text = (
@@ -411,10 +432,16 @@ def render_tab4():
 
     st.info(f"**Active state equation:** {eq_text}\n\n*{params_text}*")
 
-    st.markdown(
-        "**Intercept state (all modes):** "
-        "I_t = G₀ · I_{t-1} + Σ_k γ_k · media_k,t^{n_k}"
-    )
+    if use_hill_intercept:
+        intercept_eq_text = (
+            "I_t = G₀ · I_{t-1} + Σ_k γ_k · "
+            "media_k,t^{n_k} / (media_k,t^{n_k} + S_k^{n_k})   *(Hill)*"
+        )
+    else:
+        intercept_eq_text = (
+            "I_t = G₀ · I_{t-1} + Σ_k γ_k · media_k,t^{n_k}   *(Power)*"
+        )
+    st.markdown(f"**Intercept state (all modes):** {intercept_eq_text}")
 
     st.divider()
 
@@ -465,8 +492,10 @@ def render_tab4():
         options=intercept_effector_options, default=list(media), key="intercept_eff")
     if any(c in non_media for c in intercept_effectors):
         info(
-            "Non-media effectors boost the intercept using their <b>raw value</b> each "
-            "period (no transformation applied)."
+            "Non-media effectors boost the intercept through the same "
+            f"<b>{'Hill' if use_hill_intercept else 'Power'}</b> intercept transform "
+            "as media effectors, each with its own independently-fitted "
+            "n_intercept" + (" and S_intercept" if use_hill_intercept else "") + "."
         )
 
     # Intercept effectors for Dep 2 — independent selection
@@ -487,8 +516,9 @@ def render_tab4():
         )
         if any(c in non_media_2 for c in intercept_effectors_2):
             info(
-                "Non-media effectors for Dep 2 boost its intercept using their "
-                "<b>raw value</b> each period (no transformation applied)."
+                "Non-media effectors for Dep 2 boost its intercept through the same "
+                f"<b>{'Hill' if use_hill_intercept else 'Power'}</b> intercept transform "
+                "as media effectors (Dep 2 shares Dep 1's Intercept Transform Type)."
             )
 
     st.divider()
@@ -632,6 +662,7 @@ def render_tab4():
                 "negative_beta_cols_2": negative_beta_cols_2,
                 "adstock_type": adstock_type_str,
                 "transform_type": transform_type_str,
+                "intercept_transform_type": intercept_transform_type_str,
                 "adstock_n_lags": int(n_lags),
                 "use_organic": use_organic,
                 "use_price": use_price,

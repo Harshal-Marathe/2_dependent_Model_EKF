@@ -53,9 +53,21 @@ def _build_variable_index(g):
 
 
 def build_intercept_decomposition_df(res, df_full):
-    """Period-by-period decomposition of the intercept's own state equation:
+    """Period-by-period decomposition of the intercept's own state equation.
 
+    Power (default):
         I_t = G0 * I_(t-1)  +  Sum_k gamma_k * media_k,t^(n_k_intercept)
+
+    Hill:
+        I_t = G0 * I_(t-1)  +  Sum_k gamma_k *
+                  media_k,t^(n_k_intercept) /
+                  (media_k,t^(n_k_intercept) + S_k_intercept^(n_k_intercept))
+
+    Which one applies is set independently of the media betas' own
+    Transform Type, via config "intercept_transform_type"
+    (g["INTERCEPT_TRANSFORM_TYPE"]) — see modules/kalman.py's module
+    docstring. Every intercept-effector column is transformed the same
+    way, whether or not it's also a media channel with its own beta.
 
     Column order (left to right): Period, then for each intercept-effector
     channel a Media_<name> / Transformed_<name> / GammaXTransformed_<name>
@@ -63,8 +75,7 @@ def build_intercept_decomposition_df(res, df_full):
     full smoothed intercept level, I_t) as the last two columns.
     """
     g = res["g"]; params = res["params"]; x_smooth = res["x_smooth"]
-    MEDIA_COLS = g["MEDIA_COLS"]
-    TRANSFORM_TYPE = g["TRANSFORM_TYPE"]
+    INTERCEPT_TRANSFORM_TYPE = g.get("INTERCEPT_TRANSFORM_TYPE", "power")
     T = len(df_full)
 
     G0 = float(params["G0"])
@@ -78,13 +89,12 @@ def build_intercept_decomposition_df(res, df_full):
     media_cols, trans_cols, gxt_cols = [], [], []
 
     for k, col in enumerate(g["INTERCEPT_EFFECTORS"]):
+        if col not in df_full.columns:
+            continue
         ni_int = params["n_intercept"][k]
+        si_int = params["S_intercept"][k]
         raw = df_full[col].values.astype(float)
-        if col in MEDIA_COLS:
-            transformed = apply_transformation(
-                raw, TRANSFORM_TYPE, ni_int, params["S_params"][MEDIA_COLS.index(col)])
-        else:
-            transformed = raw.copy()
+        transformed = apply_transformation(raw, INTERCEPT_TRANSFORM_TYPE, ni_int, si_int)
         gxt = params["gamma"][k] * transformed
 
         media_name, trans_name, gxt_name = f"Media_{col}", f"Transformed_{col}", f"GammaXTransformed_{col}"
@@ -245,7 +255,9 @@ def build_master_workbook_bytes(res, config, df_full):
             "for that period — same underlying number as Model_Data's Raw_*, "
             "repeated here for readability.",
             "The intercept-effector's raw value run through its own n_intercept "
-            "transform (Hill/power, per Transform Type), i.e. media_k,t^n_k_intercept.",
+            "(and, in Hill mode, S_intercept) transform, per the Intercept "
+            "Transform Type — Power or Hill — chosen independently of the "
+            "media betas' own Transform Type above.",
             "gamma_k * Transformed_* — that channel's boost contribution to the "
             "intercept's state equation for that period.",
             "G0 * Intercept_(t-1) — the persisted/carried-over piece of the "

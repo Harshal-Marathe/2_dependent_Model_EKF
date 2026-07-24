@@ -30,6 +30,14 @@ def _make_globals(cfg: dict):
     g["ADSTOCK_TYPE"]        = cfg.get("adstock_type", "instant")   # "instant" | "weibull"
     g["TRANSFORM_TYPE"]      = cfg.get("transform_type", "hill")    # "power"   | "hill"
     g["ADSTOCK_N_LAGS"]      = int(cfg.get("adstock_n_lags", 8))    # only for weibull
+    # INTERCEPT_TRANSFORM_TYPE: independent of TRANSFORM_TYPE above — lets the
+    # intercept's own effector boost (gamma_k * f(media_k,t)) use a different
+    # curve than the media betas. "power": media_k,t^n_k_intercept (unbounded
+    # diminishing-returns curve). "hill": media_k,t^n_k_intercept /
+    # (media_k,t^n_k_intercept + S_k_intercept^n_k_intercept) (bounded 0-1
+    # S-curve with its own half-saturation S_k_intercept per effector).
+    # See modules/kalman.py module docstring for both full equations.
+    g["INTERCEPT_TRANSFORM_TYPE"] = cfg.get("intercept_transform_type", "power")  # "power" | "hill"
 
     g["POSITIVE_BETA_COLS"]  = cfg.get("positive_beta_cols", [])
     g["NEGATIVE_BETA_COLS"]  = cfg.get("negative_beta_cols", [])
@@ -117,9 +125,15 @@ def unpack_theta(theta, g: dict):
     # keep it irrelevant for power — optimizer still needs a slot)
     S_params = theta[idx:idx+N_MEDIA];     idx += N_MEDIA
 
-    # ── Intercept effector transformation exponent ni ────────────────
-    # Used in: I_t = G0 * I_{t-1} + Σ gamma_i * media_i^ni
+    # ── Intercept effector transformation parameters (ni, Si) ────────
+    # Power:  I_t = G0*I_{t-1} + Σ gamma_k * media_k^n_k_intercept
+    # Hill:   I_t = G0*I_{t-1} + Σ gamma_k * media_k^n_k_intercept /
+    #                    (media_k^n_k_intercept + S_k_intercept^n_k_intercept)
+    # S_intercept is only used when INTERCEPT_TRANSFORM_TYPE == "hill", but
+    # (like S_params for the media betas) it always occupies a theta slot
+    # so the flat layout stays fixed regardless of which mode is active.
     n_intercept = theta[idx:idx+N_EFFECTORS]; idx += N_EFFECTORS
+    S_intercept = theta[idx:idx+N_EFFECTORS]; idx += N_EFFECTORS
 
     # ── Adstock parameters ────────────────────────────────────────────
     if ADSTOCK_TYPE == "weibull":
@@ -165,7 +179,7 @@ def unpack_theta(theta, g: dict):
     return dict(
         Ls=Ls, G0=G0, delta=delta, gamma=gamma,
         n_params=n_params, S_params=S_params,
-        n_intercept=n_intercept,
+        n_intercept=n_intercept, S_intercept=S_intercept,
         adstock_lambda=adstock_lambda,
         adstock_shape=adstock_shape,
         adstock_scale=adstock_scale,

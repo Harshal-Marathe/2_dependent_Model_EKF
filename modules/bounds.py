@@ -61,14 +61,26 @@ def _build_theta0_and_bounds(df, g):
         S_bounds = [_b(c, "hill_s", 1e-6, 1e8) for c in MEDIA_COLS]
         S_init   = [safe_median(df[c]) for c in MEDIA_COLS]
 
-    # ── Intercept effector exponent ni ───────────────────────────────
-    # Same transform type applies
-    if TRANSFORM_TYPE == "power":
+    # ── Intercept effector transformation (ni, Si) ────────────────────
+    # Independent of TRANSFORM_TYPE (which only governs the media betas)
+    # — the intercept equation has its own Power/Hill switch, set via
+    # config "intercept_transform_type".
+    INTERCEPT_TRANSFORM_TYPE = g.get("INTERCEPT_TRANSFORM_TYPE", "power")
+    INTERCEPT_EFFECTORS = g["INTERCEPT_EFFECTORS"]
+    if INTERCEPT_TRANSFORM_TYPE == "power":
         n_int_bounds = [(0.01, 1.0)] * N_EFFECTORS
         n_int_init   = [0.5] * N_EFFECTORS
+        # S is unused for power but keep a slot so theta layout is consistent
+        S_int_bounds = [(1e-6, 1e8)] * N_EFFECTORS
+        S_int_init   = [safe_median(df[c]) if c in df.columns else 1.0
+                        for c in INTERCEPT_EFFECTORS]
     else:
-        n_int_bounds = [(0.1, 1)] * N_EFFECTORS
-        n_int_init   = [0.5] * N_EFFECTORS
+        # Hill: n: (1, 15), S > 0 — mirrors the media Hill bounds above
+        n_int_bounds = [(1.0, 15.0)] * N_EFFECTORS
+        n_int_init   = [2.0] * N_EFFECTORS
+        S_int_bounds = [(1e-6, 1e8)] * N_EFFECTORS
+        S_int_init   = [safe_median(df[c]) if c in df.columns else 1.0
+                        for c in INTERCEPT_EFFECTORS]
 
     # ── Adstock parameters ────────────────────────────────────────────
     all_adstock_cols = list(MEDIA_COLS) + list(COMP_MEDIA_COLS)
@@ -115,6 +127,7 @@ def _build_theta0_and_bounds(df, g):
         n_init,
         S_init,
         n_int_init,
+        S_int_init,
         adstock_init,
         [np.clip(0.5, lo, hi) for lo, hi in own_nm_ls_bounds] if N_OWN_NONMEDIA else [],
         [np.clip(0.5, lo, hi) for lo, hi in comp_nm_ls_bounds] if N_COMP_NONMEDIA else [],
@@ -141,6 +154,7 @@ def _build_theta0_and_bounds(df, g):
         n_bounds +
         S_bounds +
         n_int_bounds +
+        S_int_bounds +
         adstock_bounds +
         own_nm_ls_bounds +
         comp_nm_ls_bounds +

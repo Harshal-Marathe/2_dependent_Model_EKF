@@ -124,6 +124,7 @@ _BLOCK_TO_GKEY = {
     "Ls": "MEDIA_COLS", "delta": "MEDIA_COLS",
     "n_params": "MEDIA_COLS", "S_params": "MEDIA_COLS",
     "gamma": "INTERCEPT_EFFECTORS", "n_intercept": "INTERCEPT_EFFECTORS",
+    "S_intercept": "INTERCEPT_EFFECTORS",
     "Ls_own_nonmedia": "OWN_NONMEDIA_COLS", "delta_own_nonmedia": "OWN_NONMEDIA_COLS",
     "Ls_comp_nonmedia": "COMP_NONMEDIA_COLS", "delta_comp_nonmedia": "COMP_NONMEDIA_COLS",
     "Ls_comp": "COMP_MEDIA_COLS", "delta_comp": "COMP_MEDIA_COLS",
@@ -159,6 +160,7 @@ def _block_slices(g: dict):
     add("n_params", N_MEDIA, cols=g["MEDIA_COLS"])
     add("S_params", N_MEDIA, cols=g["MEDIA_COLS"])
     add("n_intercept", N_EFFECTORS, cols=g["INTERCEPT_EFFECTORS"])
+    add("S_intercept", N_EFFECTORS, cols=g["INTERCEPT_EFFECTORS"])
     if ADSTOCK_TYPE == "weibull":
         adstock_cols = list(g["MEDIA_COLS"]) + list(g["COMP_MEDIA_COLS"])
         add("adstock_shape", N_ADSTOCK, cols=adstock_cols)

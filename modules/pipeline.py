@@ -137,15 +137,15 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
         contrib_df[f"ShortTerm_{col}"] = x_smooth[:, si] * df_full[col].values
         contrib_df[f"LongTerm_{col}"]  = 0.0
 
+    INTERCEPT_TRANSFORM_TYPE = g.get("INTERCEPT_TRANSFORM_TYPE", "power")
     for k, col in enumerate(g["INTERCEPT_EFFECTORS"]):
+        if col not in df_full.columns:
+            continue
         ni_int = params["n_intercept"][k]
-        if col in MEDIA_COLS:
-            raw = df_full[col].values.astype(float)
-            transformed = apply_transformation(
-                raw, TRANSFORM_TYPE, ni_int, params["S_params"][MEDIA_COLS.index(col)])
-            contrib_df[f"LongTerm_{col}"] = params["gamma"][k] * transformed
-        elif col in df_full.columns:
-            contrib_df[f"LongTerm_{col}"] = params["gamma"][k] * df_full[col].values.astype(float)
+        si_int = params["S_intercept"][k]
+        raw = df_full[col].values.astype(float)
+        transformed = apply_transformation(raw, INTERCEPT_TRANSFORM_TYPE, ni_int, si_int)
+        contrib_df[f"LongTerm_{col}"] = params["gamma"][k] * transformed
 
     for k, (tgt, src) in enumerate(g["CROSS_MEDIA_PAIRS"]):
         contrib_df[f"Synergy_{tgt}_from_{src}"] = cross_beta_contrib[:, k]
@@ -204,8 +204,14 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
         })
         param_rows.append({
             "Category": "Intercept Effector", "Variable": f"{col} ({effector_kind})",
-            "Parameter": "n_intercept (exponent)", "Value": params["n_intercept"][k],
+            "Parameter": f"n_intercept ({'Hill slope' if INTERCEPT_TRANSFORM_TYPE == 'hill' else 'exponent'})",
+            "Value": params["n_intercept"][k],
         })
+        if INTERCEPT_TRANSFORM_TYPE == "hill":
+            param_rows.append({
+                "Category": "Intercept Effector", "Variable": f"{col} ({effector_kind})",
+                "Parameter": "S_intercept (Half-sat)", "Value": params["S_intercept"][k],
+            })
 
     for i, col in enumerate(MEDIA_COLS):
         if TRANSFORM_TYPE == "hill":
