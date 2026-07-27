@@ -32,15 +32,25 @@ def _build_theta0_and_bounds(df, g):
 
     # G0 bound
     G0_bound = (0.7, 0.99)
-    G0_init  =  (G0_bound[0] + G0_bound[1]) / 2 # or similar, just keep it inside the new bound
+    G0_init  = (G0_bound[0] + G0_bound[1]) / 2  # 0.845 — always valid even if bound changes later
 
     # delta bounds: positive or negative constraint per media col
     def _delta_bound(col):
         if col in POSITIVE_BETA_COLS: return (0.0, None)
         if col in NEGATIVE_BETA_COLS: return (None, 0.0)
         return (None, None)
+
+    # Sign-aware init: must land on the correct side of _delta_bound /
+    # _nm_delta_bound for any column the user has marked as
+    # POSITIVE_BETA_COLS / NEGATIVE_BETA_COLS, or Nevergrad's set_bounds()
+    # will raise NevergradValueError (same failure mode as the G0/delta_comp
+    # bugs below — init and bound disagreeing on sign).
+    def _delta_init(col, mag=0.05):
+        if col in NEGATIVE_BETA_COLS: return -mag
+        return mag  # covers POSITIVE_BETA_COLS and unconstrained cols
+
     delta_bounds = [_delta_bound(c) for c in MEDIA_COLS]
-    delta_init   = np.full(N_MEDIA, 0.05)
+    delta_init   = np.array([_delta_init(c, mag=0.05) for c in MEDIA_COLS])
 
     # gamma bounds (intercept effectors — always positive)
     gamma_bounds = [(0.0, None)] * N_EFFECTORS
@@ -110,6 +120,7 @@ def _build_theta0_and_bounds(df, g):
         if col in NEGATIVE_BETA_COLS: return (None, 0.0)
         return (None, None)
     own_nm_delta_bounds = [_nm_delta_bound(c) for c in g["OWN_NONMEDIA_COLS"]]
+    own_nm_delta_init   = np.array([_delta_init(c, mag=0.01) for c in g["OWN_NONMEDIA_COLS"]])
     comp_nm_delta_bounds = [(None, 0)] * N_COMP_NONMEDIA
 
     # ── Competitor media ──────────────────────────────────────────────
@@ -131,10 +142,10 @@ def _build_theta0_and_bounds(df, g):
         adstock_init,
         [np.clip(0.5, lo, hi) for lo, hi in own_nm_ls_bounds] if N_OWN_NONMEDIA else [],
         [np.clip(0.5, lo, hi) for lo, hi in comp_nm_ls_bounds] if N_COMP_NONMEDIA else [],
-        np.full(N_OWN_NONMEDIA, 0.01),
+        own_nm_delta_init if N_OWN_NONMEDIA else [],
         np.full(N_COMP_NONMEDIA, -0.01),
         [np.clip(0.5, lo, hi) for lo, hi in ls_comp_bounds] if N_COMP else [],
-        np.full(N_COMP, 0.02),
+        np.full(N_COMP, -0.02),   # bound requires (None, 0) — competitor spend must hurt you
         np.full(N_COMP, 1.5),
         [safe_median(df[c]) for c in COMP_MEDIA_COLS] if COMP_MEDIA_COLS else [],
         np.full(N_CROSS, 0.02),
@@ -172,4 +183,23 @@ def _build_theta0_and_bounds(df, g):
         ([(-1.0, 1.0)] if USE_ORGANIC_DRIFT else []) +
         [(1e-3, None)]                   # sigma_y
     )
+
+    # ── Safety net ───────────────────────────────────────────────────
+    # Guarantees theta0[i] always lies inside bounds[i], regardless of
+    # whether every init/bound pair above was kept in sync by hand (they
+    # weren't, historically — see the G0_init and delta_comp fixes above).
+    # This is a backstop, not a substitute for the sign-aware inits above:
+    # without those, this clip would just silently start the optimizer
+    # sitting on a boundary instead of crashing, which is better than a
+    # crash but still not a real fix for the wrong intent.
+    assert len(theta0) == len(bounds), (
+        f"theta0/bounds length mismatch: {len(theta0)} vs {len(bounds)}"
+    )
+    theta0 = np.array([
+        float(np.clip(v,
+                       lo if lo is not None else -np.inf,
+                       hi if hi is not None else  np.inf))
+        for v, (lo, hi) in zip(theta0, bounds)
+    ])
+
     return theta0, bounds
