@@ -181,7 +181,7 @@ def _build_theta0_and_bounds(df, g):
         price_ls_bounds +                # Ls_price
         [(None, 0)] * N_PRICE +          # delta_price
         ([(-1.0, 1.0)] if USE_ORGANIC_DRIFT else []) +
-        [(1e-3, 2*std)]                   # sigma_y
+        [(1e-3, 2*df[g["TARGET_COL"]].std())]                   # sigma_y
     )
 
     # ── Safety net ───────────────────────────────────────────────────
