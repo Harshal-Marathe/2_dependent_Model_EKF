@@ -50,7 +50,7 @@ def _composite_loss(theta, df_train, g, ng_weights, static_cache=None):
         return 1e12
 
 
-def _ask_eval_tell_loop(optimizer, budget, num_workers, strategy_name, loss_fn, progress_label):
+def _ask_eval_tell_loop(optimizer, budget, num_workers, progress_label, loss_fn):
     """
     Shared ask/evaluate/tell driver for both the single-equation and joint
     Nevergrad optimizers.
