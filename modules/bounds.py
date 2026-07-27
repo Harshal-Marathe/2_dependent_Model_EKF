@@ -32,7 +32,7 @@ def _build_theta0_and_bounds(df, g):
 
     # G0 bound
     G0_bound = (0.7, 0.99)
-    G0_init  = 0.9  # or similar, just keep it inside the new bound
+    G0_init  = 0.8  # or similar, just keep it inside the new bound
 
     # delta bounds: positive or negative constraint per media col
     def _delta_bound(col):
