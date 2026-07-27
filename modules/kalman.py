@@ -484,7 +484,7 @@ def _initial_state(df, g, params, pc):
     N_OWN_NONMEDIA = g["N_OWN_NONMEDIA"]; N_COMP_NONMEDIA = g["N_COMP_NONMEDIA"]
 
     x0 = np.zeros(dim)
-    x0[0] = df[TARGET_COL].mean() * 0.8
+    x0[0] = df[TARGET_COL].mean() * 0.1
     for i, col in enumerate(MEDIA_COLS):
         x0[i+1] = g["INITIAL_MEDIA_BETAS"].get(col, 0.0)
     for j, col in enumerate(COMP_MEDIA_COLS):
