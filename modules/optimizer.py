@@ -99,14 +99,14 @@ def _ask_eval_tell_loop(optimizer, budget, num_workers, strategy_name, loss_fn, 
 
 def run_nevergrad_optimizer(df_train, g, theta0, bounds, ng_cfg, static_cache=None):
     import nevergrad as ng
-    strategy_name = ng_cfg.get("strategy", "NgIohh"); budget = ng_cfg.get("budget", 500)
+    strategy_name = ng_cfg.get("strategy", "NGOpt"); budget = ng_cfg.get("budget", 500)
     num_workers = max(1, int(ng_cfg.get("num_workers", 1))); ng_weights = ng_cfg.get("ng_weights", {})
     if static_cache is None:
         static_cache = build_static_cache(df_train, g)
     lows  = np.array([b[0] if b[0] is not None else -1e6 for b in bounds])
     highs = np.array([b[1] if b[1] is not None else  1e6 for b in bounds])
     param = ng.p.Array(init=theta0).set_bounds(lows, highs)
-    optimizer_cls = getattr(ng.optimizers, strategy_name, None) or ng.optimizers.NgIohh
+    optimizer_cls = getattr(ng.optimizers, strategy_name, None) or ng.optimizers.NGOpt
     optimizer = optimizer_cls(parametrization=param, budget=budget, num_workers=num_workers)
 
     loss_fn = lambda theta: _composite_loss(theta, df_train, g, ng_weights, static_cache)
@@ -176,7 +176,7 @@ def run_nevergrad_optimizer_joint(df_train, g1, g2, theta0_joint, bounds_joint, 
     theta_1, theta_2, rho, and the cross-intercept coupling phi_1/phi_2
     together against the bivariate loglik."""
     import nevergrad as ng
-    strategy_name = ng_cfg.get("strategy", "NgIohh"); budget = ng_cfg.get("budget", 500)
+    strategy_name = ng_cfg.get("strategy", "NGOpt"); budget = ng_cfg.get("budget", 500)
     num_workers = max(1, int(ng_cfg.get("num_workers", 1))); ng_weights = ng_cfg.get("ng_weights", {})
     if static_cache1 is None:
         static_cache1 = build_static_cache(df_train, g1)
@@ -185,7 +185,7 @@ def run_nevergrad_optimizer_joint(df_train, g1, g2, theta0_joint, bounds_joint, 
     lows  = np.array([b[0] if b[0] is not None else -1e6 for b in bounds_joint])
     highs = np.array([b[1] if b[1] is not None else  1e6 for b in bounds_joint])
     param = ng.p.Array(init=theta0_joint).set_bounds(lows, highs)
-    optimizer_cls = getattr(ng.optimizers, strategy_name, None) or ng.optimizers.NgIohh
+    optimizer_cls = getattr(ng.optimizers, strategy_name, None) or ng.optimizers.NGOpt
     optimizer = optimizer_cls(parametrization=param, budget=budget, num_workers=num_workers)
 
     loss_fn = lambda theta: _composite_loss_joint(

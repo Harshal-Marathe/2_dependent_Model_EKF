@@ -98,7 +98,7 @@ def render_tab5(nevergrad_available: bool):
         ng_col1, ng_col2 = st.columns(2)
         with ng_col1:
             ng_strategy = st.selectbox("Strategy",
-                ["NgIohh","DE","TwoPointsDE","CMA","PSO","OnePlusOne","RandomSearch","MetaModel"])
+                ["TwoPointsDE","NGOpt","CMA","PSO","DE","OnePlusOne","RandomSearch","MetaModel"])
             ng_budget   = st.number_input("Budget (evaluations)", 100, 10000, 500, 50)
         with ng_col2:
             ng_workers  = st.number_input("Parallel workers", 1, 8, 1, 1)
