@@ -91,9 +91,9 @@ def render_tab5(nevergrad_available: bool):
         if not nevergrad_available:
             st.error("Nevergrad not installed. Run `pip install nevergrad`."); st.stop()
         ng_info(
-            "🟣 <b>Nevergrad Optimizer</b><br>"
-            "Loss = <code>−loglik</code> — same objective as L-BFGS-B / SLSQP, "
-            "just optimised with a derivative-free search strategy instead of a gradient-based one."
+            "🟣 <b>Nevergrad Multi-Objective Optimizer</b><br>"
+            "Loss = <code>−w_loglik·loglik + w_mape·max(0,MAPE−target)² "
+            "+ w_r2·max(0,R²_target−R²)² + w_pos·positivity_violations</code>"
         )
         ng_col1, ng_col2 = st.columns(2)
         with ng_col1:
@@ -104,9 +104,28 @@ def render_tab5(nevergrad_available: bool):
             ng_workers  = st.number_input("Parallel workers", 1, 8, 1, 1)
             max_iter    = ng_budget
 
+        st.markdown("#### Loss Weights")
+        wc1, wc2, wc3, wc4 = st.columns(4)
+        with wc1: w_loglik = st.number_input("w_loglik", 0.0, 100.0,    1.0, 0.5)
+        with wc2: w_mape   = st.number_input("w_mape",   0.0, 1000.0,  10.0, 1.0)
+        with wc3: w_r2     = st.number_input("w_r2",     0.0, 1000.0,   5.0, 0.5)
+        with wc4: w_pos    = st.number_input("w_pos",    0.0, 10000.0, 100.0, 10.0)
+        tc1, tc2 = st.columns(2)
+        with tc1: mape_target = st.slider("MAPE target", 0.01, 0.50, 0.10, 0.01, format="%.2f")
+        with tc2: r2_target   = st.slider("R² target",   0.50, 0.99, 0.80, 0.01, format="%.2f")
         ng_cfg = {
             "strategy": ng_strategy, "budget": int(ng_budget), "num_workers": int(ng_workers),
+            "ng_weights": {
+                "w_loglik": w_loglik, "w_mape": w_mape, "w_r2": w_r2, "w_pos": w_pos,
+                "mape_target": mape_target, "r2_target": r2_target,
+            },
         }
+        st.markdown(
+            f"> Loss = `−{w_loglik:.1f}·loglik` + "
+            f"`{w_mape:.1f}·max(0,MAPE−{mape_target:.2f})²` + "
+            f"`{w_r2:.1f}·max(0,{r2_target:.2f}−R²)²` + "
+            f"`{w_pos:.1f}·positivity_violations`"
+        )
     else:
         col1, _ = st.columns(2)
         with col1: max_iter = st.number_input("Max iterations", 100, 5000, 800, 100)

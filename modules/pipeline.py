@@ -421,19 +421,9 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     #   Intercept_1,t = G0_1·Intercept_1,t-1 + phi_1·Intercept_2,t-1 + effectors_1,t
     #   Intercept_2,t = G0_2·Intercept_2,t-1 + phi_2·Intercept_1,t-1 + effectors_2,t
     phi1_0, phi2_0 = 0.0, 0.0
-    phi_bounds = (0.0, None)
+    phi_bounds = (0.1, None)
     theta0_joint = np.concatenate([theta0_1, theta0_2, [rho0, phi1_0, phi2_0]])
     bounds_joint = list(bounds1) + list(bounds2) + [rho_bounds, phi_bounds, phi_bounds]
-    # Safety net (mirrors modules/bounds.py): guarantees theta0_joint[i] always
-    # lies inside bounds_joint[i], since the rho/phi appends above happen after
-    # theta0_1/theta0_2 were already clipped individually and aren't covered by
-    # that earlier clip.
-    theta0_joint = np.array([
-        float(np.clip(v,
-                       lo if lo is not None else -np.inf,
-                       hi if hi is not None else  np.inf))
-        for v, (lo, hi) in zip(theta0_joint, bounds_joint)
-    ])
 
     static_cache1_train = build_static_cache(df_train, g1)
     static_cache2_train = build_static_cache(df_train, g2)
