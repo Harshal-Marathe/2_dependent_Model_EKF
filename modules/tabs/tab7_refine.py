@@ -46,20 +46,24 @@ def _reset_refit_state():
     }]
 
 
-def _bounds_widget_for(col, role, refit_config, df, key_prefix):
+def _bounds_widget_for(col, role, refit_config, df, key_prefix, adstock_choice="instant"):
     """Route to render_per_channel_bounds with the right column bucket for
-    the chosen role, returning just this column's bounds dict."""
-    use_hill    = refit_config.get("transform_type", "hill") == "hill"
-    use_weibull = refit_config.get("adstock_type", "instant") == "weibull"
+    the chosen role, returning just this column's bounds dict.
+
+    `adstock_choice`: this specific column's OWN "weibull"/"instant" pick
+    (adstock is per-channel now — see modules/bounds_ui.py) — NOT a global
+    model-wide flag."""
+    use_hill = refit_config.get("transform_type", "hill") == "hill"
+    adstock_map = {col: adstock_choice}
 
     if role == "media":
-        b = render_per_channel_bounds([col], [], key_prefix, df, use_hill, use_weibull)
+        b = render_per_channel_bounds([col], [], key_prefix, df, use_hill, adstock_map)
     elif role == "comp_media":
-        b = render_per_channel_bounds([col], [col], key_prefix, df, use_hill, use_weibull)
+        b = render_per_channel_bounds([col], [col], key_prefix, df, use_hill, adstock_map)
     elif role == "price":
-        b = render_per_channel_bounds([], [], key_prefix, df, use_hill, use_weibull, price_cols=[col])
+        b = render_per_channel_bounds([], [], key_prefix, df, use_hill, adstock_map, price_cols=[col])
     else:  # non_media / comp_nonmedia
-        b = render_per_channel_bounds([], [], key_prefix, df, use_hill, use_weibull, nonmedia_cols=[col])
+        b = render_per_channel_bounds([], [], key_prefix, df, use_hill, adstock_map, nonmedia_cols=[col])
     return b.get(col, {})
 
 
@@ -198,13 +202,26 @@ def render_tab7():
                 format_func=lambda k: ROLE_LABELS[k], key="refit_new_role",
             )
 
+        new_adstock_choice = "instant"
+        if role_key != "price":
+            adstock_pick = st.radio(
+                f"Adstock type for `{new_col}`",
+                ["⚡ Instant (Nerlove-Arrow)", "🌀 Weibull (delayed)"],
+                horizontal=True, key="refit_new_adstock",
+                help="Chosen per channel, same as Tab 5 · Section D — this "
+                     "only affects this one new variable.",
+            )
+            new_adstock_choice = "weibull" if adstock_pick.startswith("🌀") else "instant"
+
         st.caption(f"Set bounds for **{new_col}** — these are the ONLY parameters "
                    f"that will actually be searched over in this refit.")
         new_bounds = _bounds_widget_for(new_col, role_key, refit_config, df,
-                                         key_prefix=f"refit_new_{new_col}_")
+                                         key_prefix=f"refit_new_{new_col}_",
+                                         adstock_choice=new_adstock_choice)
 
         if st.button(f"➕ Add `{new_col}` & Refit", type="primary", key="refit_add_btn"):
-            new_config = add_variable_to_config(refit_config, new_col, role_key, new_bounds)
+            new_config = add_variable_to_config(refit_config, new_col, role_key, new_bounds,
+                                                 adstock_choice=new_adstock_choice)
             _run_and_record(
                 df, new_config, "Added variable", new_col,
                 unfreeze_cols=set(), freeze_existing=freeze_existing,
@@ -234,7 +251,7 @@ def render_tab7():
         adj_col, adj_role = existing_vars[labels.index(pick)]
 
         g_now = refit_result["g"]
-        specs = editable_params_for_role(adj_role, g_now)
+        specs = editable_params_for_role(adj_role, g_now, col=adj_col)
         overrides = {}
         for block_name, param_label, is_unit_interval in specs:
             current = get_current_value(refit_result, adj_col, block_name)

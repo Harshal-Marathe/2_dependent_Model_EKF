@@ -23,7 +23,14 @@ def render_tab5(nevergrad_available: bool):
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Media channels", len(config["media"]))
     c2.metric("Price vars",     len(config.get("price", [])))
-    combo = f"{config["adstock_type"].title()} × {config.get("transform_type","hill").title()}"
+    adstock_map = config.get("adstock_map", {})
+    if adstock_map:
+        n_w = sum(1 for v in adstock_map.values() if v == "weibull")
+        n_i = len(adstock_map) - n_w
+        adstock_label = f"Mixed ({n_w}W/{n_i}I)" if (n_w and n_i) else ("Weibull" if n_w else "Instant")
+    else:
+        adstock_label = config.get("adstock_type", "instant").title()
+    combo = f"{adstock_label} × {config.get('transform_type','hill').title()}"
     c3.metric("Adstock×Transform", combo)
     c4.metric("Train / Test",   f"{config['n_train']} / {config['n_test']}")
 

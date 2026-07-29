@@ -133,28 +133,27 @@ from modules.transforms import (
 
 def _precompute_adstocked(df, g, params):
     """
-    For Weibull adstock: compute the weighted-lag sum for each channel.
-    For Instant (Nerlove-Arrow): NOT computed. In instant mode, carryover
-    is carried entirely by each state's own Ls persistence (β_i,t = Ls_i ·
-    β_i,t-1 + shock), so a separately-decayed adstocked series is no longer
-    needed anywhere in the pipeline — building it would only invite the
-    double-carryover bug (Ls persistence stacked on top of λ decay) this
-    function used to enable. Returns dict col -> np.ndarray of length T
-    (empty dict in instant mode).
+    Per-channel now: for every channel (in MEDIA_COLS, COMP_MEDIA_COLS,
+    OWN_NONMEDIA_COLS, or COMP_NONMEDIA_COLS) individually set to
+    "weibull" in g["ADSTOCK_MAP"], compute its weighted-lag sum using its
+    own fitted shape/scale (looked up via g["ADSTOCK_IDX"]). Channels left
+    on "instant" (Nerlove-Arrow) are NOT computed — their carryover is
+    carried entirely by that state's own Ls persistence (β_i,t = Ls_i ·
+    β_i,t-1 + shock); building a separately-decayed adstocked series for
+    them would only invite a double-carryover bug (Ls persistence stacked
+    on top of a λ decay). Returns dict col -> np.ndarray of length T,
+    containing only the weibull-selected channels.
     """
-    adstock_type = g["ADSTOCK_TYPE"]
-    if adstock_type != "weibull":
-        return {}
-
+    adstock_map = g.get("ADSTOCK_MAP", {})
+    adstock_idx = g.get("ADSTOCK_IDX", {})
     n_lags = int(params.get("adstock_n_lags", 8))
     adstocked = {}
 
-    for i, col in enumerate(g["MEDIA_COLS"]):
-        adstocked[col] = adstock_weibull_lagged(
-            df[col], params["adstock_shape"][i], params["adstock_scale"][i], n_lags)
-
-    for j, col in enumerate(g["COMP_MEDIA_COLS"]):
-        ci = g["N_MEDIA"] + j
+    for col in (list(g["MEDIA_COLS"]) + list(g["COMP_MEDIA_COLS"]) +
+                list(g["OWN_NONMEDIA_COLS"]) + list(g["COMP_NONMEDIA_COLS"])):
+        if adstock_map.get(col) != "weibull" or col not in adstock_idx:
+            continue
+        ci = adstock_idx[col]
         adstocked[col] = adstock_weibull_lagged(
             df[col], params["adstock_shape"][ci], params["adstock_scale"][ci], n_lags)
 
@@ -203,17 +202,24 @@ def _build_transition_matrix(g, params):
     dim = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + N_COMP_NONMEDIA + N_PRICE + N_DUMMIES + SEASONAL_DIM
     Tmat = np.eye(dim)
     Tmat[0, 0] = params["G0"]
-    ADSTOCK_TYPE = g["ADSTOCK_TYPE"]
-    for i in range(N_MEDIA):
-        # Weibull mode: β_i,t = Σ_l w_l·x_i,t-l + δ_i·f(x_i,t) + synergy  (no λ·β_t-1 term —
-        # the weighted-lag sum itself supplies the state's "memory", per the docstring).
-        # Instant mode: β_i,t = λ_i·β_i,t-1 + δ_i·f(x_i,t) + synergy.
-        Tmat[i+1, i+1] = 0.0 if ADSTOCK_TYPE == "weibull" else params["Ls"][i]
-    for j in range(N_COMP):  Tmat[1+N_MEDIA+j, 1+N_MEDIA+j] = params["Ls_comp"][j]
-    for k in range(N_OWN_NONMEDIA):
-        idx = 1+N_MEDIA+N_COMP+k; Tmat[idx, idx] = params["Ls_own_nonmedia"][k]
-    for k in range(N_COMP_NONMEDIA):
-        idx = 1+N_MEDIA+N_COMP+N_OWN_NONMEDIA+k; Tmat[idx, idx] = params["Ls_comp_nonmedia"][k]
+    ADSTOCK_MAP = g.get("ADSTOCK_MAP", {})
+    # Per channel now — weibull mode: β_i,t = Σ_l w_l·x_i,t-l + δ_i·f(x_i,t) + synergy
+    # (no λ·β_t-1 term — the weighted-lag sum itself supplies the state's
+    # "memory"). Instant mode: β_i,t = λ_i·β_i,t-1 + δ_i·f(x_i,t) + synergy.
+    # This weibull-vs-instant branch now applies independently to each
+    # channel in every group below (own media, comp media, own non-media,
+    # comp non-media) — price never gets a weibull option.
+    for i, col in enumerate(g["MEDIA_COLS"]):
+        Tmat[i+1, i+1] = 0.0 if ADSTOCK_MAP.get(col) == "weibull" else params["Ls"][i]
+    for j, col in enumerate(g["COMP_MEDIA_COLS"]):
+        idx = 1+N_MEDIA+j
+        Tmat[idx, idx] = 0.0 if ADSTOCK_MAP.get(col) == "weibull" else params["Ls_comp"][j]
+    for k, col in enumerate(g["OWN_NONMEDIA_COLS"]):
+        idx = 1+N_MEDIA+N_COMP+k
+        Tmat[idx, idx] = 0.0 if ADSTOCK_MAP.get(col) == "weibull" else params["Ls_own_nonmedia"][k]
+    for k, col in enumerate(g["COMP_NONMEDIA_COLS"]):
+        idx = 1+N_MEDIA+N_COMP+N_OWN_NONMEDIA+k
+        Tmat[idx, idx] = 0.0 if ADSTOCK_MAP.get(col) == "weibull" else params["Ls_comp_nonmedia"][k]
     for d in range(N_DUMMIES):
         idx = 1+N_MEDIA+N_COMP+N_OWN_NONMEDIA+N_COMP_NONMEDIA+d; Tmat[idx, idx] = 0.98
     for p in range(N_PRICE):
@@ -343,7 +349,7 @@ def _prepare_equation(df, g, params, static_cache=None):
     N_OWN_NONMEDIA = g["N_OWN_NONMEDIA"]; N_COMP_NONMEDIA = g["N_COMP_NONMEDIA"]
     N_PRICE = g["N_PRICE"]; N_DUMMIES = g["N_DUMMIES"]
     N_CROSS = g["N_CROSS"]; SEASONAL_DIM = g["SEASONAL_DIM"]
-    ADSTOCK_TYPE  = g["ADSTOCK_TYPE"]
+    ADSTOCK_MAP = g.get("ADSTOCK_MAP", {})
     TRANSFORM_TYPE = g["TRANSFORM_TYPE"]
 
     T_len = len(df)
@@ -395,18 +401,19 @@ def _prepare_equation(df, g, params, static_cache=None):
     # adstocked, since there the weighted-lag series IS the delay model.
     transformed_comp = np.stack([
         hill_transform_vec(
-            (adstocked_media[c] if ADSTOCK_TYPE == "weibull" else df[c].values.astype(float)),
+            (adstocked_media[c] if ADSTOCK_MAP.get(c) == "weibull" else df[c].values.astype(float)),
             params["n_comp"][j], params["S_comp"][j])
         for j, c in enumerate(COMP_MEDIA_COLS)
     ], axis=1) if COMP_MEDIA_COLS else np.zeros((T_len, 0))
 
-    # Cross-media synergy: Hill on RAW source in instant mode, for the same
-    # reason — the synergy contribution folds into the target channel's own
-    # beta, which already persists forward via its own Ls; adstocking the
-    # source on top of that would carry the source's effect over twice.
+    # Cross-media synergy: Hill on RAW source for instant-adstock sources,
+    # for the same reason — the synergy contribution folds into the target
+    # channel's own beta, which already persists forward via its own Ls;
+    # adstocking the source on top of that would carry its effect over
+    # twice. Decided per the SOURCE channel's own adstock choice.
     transformed_cross = np.zeros((T_len, N_CROSS))
     for k, (tgt, src) in enumerate(CROSS_MEDIA_PAIRS):
-        src_series = adstocked_media[src] if ADSTOCK_TYPE == "weibull" else df[src].values.astype(float)
+        src_series = adstocked_media[src] if ADSTOCK_MAP.get(src) == "weibull" else df[src].values.astype(float)
         transformed_cross[:, k] = hill_transform_vec(
             src_series, params["cross_n"][k], params["cross_S"][k])
 
@@ -429,11 +436,23 @@ def _prepare_equation(df, g, params, static_cache=None):
         intercept_boost += params["gamma"][k] * _transform_media(
             raw, INTERCEPT_TRANSFORM_TYPE, ni_int, si_int)
 
-    # Weibull weighted-lag arrays for state transition
-    weibull_lagsum_own = (
-        np.stack([adstocked_media[c] for c in MEDIA_COLS], axis=1)
-        if (ADSTOCK_TYPE == "weibull" and MEDIA_COLS) else np.zeros((T_len, N_MEDIA))
-    )
+    # Weibull weighted-lag arrays for state transition — per channel now.
+    # A channel on "instant" contributes an all-zero column here (harmless
+    # to add in _predict_step, since its Tmat diagonal already carries its
+    # Ls persistence instead). Built for every group that can use weibull
+    # adstock: own media, comp media, own non-media, comp non-media.
+    def _lagsum_block(cols, n):
+        if not cols:
+            return np.zeros((T_len, n))
+        return np.stack([
+            adstocked_media[c] if ADSTOCK_MAP.get(c) == "weibull" else np.zeros(T_len)
+            for c in cols
+        ], axis=1)
+
+    weibull_lagsum_own          = _lagsum_block(MEDIA_COLS, N_MEDIA)
+    weibull_lagsum_comp         = _lagsum_block(COMP_MEDIA_COLS, N_COMP)
+    weibull_lagsum_own_nonmedia = _lagsum_block(OWN_NONMEDIA_COLS, N_OWN_NONMEDIA)
+    weibull_lagsum_comp_nonmedia = _lagsum_block(COMP_NONMEDIA_COLS, N_COMP_NONMEDIA)
 
     positive_cols = set(g.get("POSITIVE_BETA_COLS", []))
     negative_cols = set(g.get("NEGATIVE_BETA_COLS", []))
@@ -459,11 +478,14 @@ def _prepare_equation(df, g, params, static_cache=None):
         PRICE_COLS=PRICE_COLS, CROSS_MEDIA_PAIRS=CROSS_MEDIA_PAIRS,
         N_MEDIA=N_MEDIA, N_COMP=N_COMP, N_OWN_NONMEDIA=N_OWN_NONMEDIA,
         N_COMP_NONMEDIA=N_COMP_NONMEDIA, N_PRICE=N_PRICE, N_CROSS=N_CROSS,
-        ADSTOCK_TYPE=ADSTOCK_TYPE, USE_ORGANIC_DRIFT=g["USE_ORGANIC_DRIFT"],
+        ADSTOCK_MAP=ADSTOCK_MAP, USE_ORGANIC_DRIFT=g["USE_ORGANIC_DRIFT"],
         adstocked_media=adstocked_media, L_mat=L_mat, Tmat=Tmat, Q=Q,
         transformed_own=transformed_own, transformed_comp=transformed_comp,
         transformed_cross=transformed_cross, intercept_boost=intercept_boost,
         weibull_lagsum_own=weibull_lagsum_own,
+        weibull_lagsum_comp=weibull_lagsum_comp,
+        weibull_lagsum_own_nonmedia=weibull_lagsum_own_nonmedia,
+        weibull_lagsum_comp_nonmedia=weibull_lagsum_comp_nonmedia,
         positive_cols=positive_cols, negative_cols=negative_cols,
         positive_state_idx=positive_state_idx, negative_state_idx=negative_state_idx,
         intercept_floor=intercept_floor,
@@ -519,19 +541,18 @@ def _predict_step(t, x_prev, df, pc):
     COMP_NONMEDIA_COLS = pc["COMP_NONMEDIA_COLS"]; PRICE_COLS = pc["PRICE_COLS"]
     CROSS_MEDIA_PAIRS = pc["CROSS_MEDIA_PAIRS"]
     N_MEDIA = pc["N_MEDIA"]; N_COMP = pc["N_COMP"]
-    ADSTOCK_TYPE = pc["ADSTOCK_TYPE"]
     positive_cols = pc["positive_cols"]; negative_cols = pc["negative_cols"]
 
     x_p = pc["Tmat"] @ x_prev
     cross_contrib_row = np.zeros(pc["N_CROSS"])
 
     # ── Own-media state equations ────────────────────────────
+    # Per channel now: weibull_lagsum_own[t, i] is 0 for any channel on
+    # instant adstock (its carryover already lives in Tmat's diagonal via
+    # Ls, applied above by the matrix multiply), so this add is safe to do
+    # unconditionally for every channel regardless of its individual choice.
     for i in range(N_MEDIA):
-        if ADSTOCK_TYPE == "weibull":
-            x_p[i+1] = pc["weibull_lagsum_own"][t, i] + params["delta"][i] * pc["transformed_own"][t, i]
-        else:
-            shock = params["delta"][i] * pc["transformed_own"][t, i]
-            x_p[i+1] += shock
+        x_p[i+1] += pc["weibull_lagsum_own"][t, i] + params["delta"][i] * pc["transformed_own"][t, i]
         if MEDIA_COLS[i] in positive_cols:
             x_p[i+1] = max(x_p[i+1], 1e-8)
         elif MEDIA_COLS[i] in negative_cols:
@@ -539,8 +560,9 @@ def _predict_step(t, x_prev, df, pc):
 
     # ── Competitor media ─────────────────────────────────────
     for j in range(N_COMP):
-        x_p[1+N_MEDIA+j] += params["delta_comp"][j] * pc["transformed_comp"][t, j]
-        x_p[1+N_MEDIA+j]  = min(x_p[1+N_MEDIA+j], -1e-8)
+        idx = 1+N_MEDIA+j
+        x_p[idx] += pc["weibull_lagsum_comp"][t, j] + params["delta_comp"][j] * pc["transformed_comp"][t, j]
+        x_p[idx]  = min(x_p[idx], -1e-8)
 
     # ── Cross-media synergy ───────────────────────────────────
     for k, (tgt, src) in enumerate(CROSS_MEDIA_PAIRS):
@@ -550,16 +572,18 @@ def _predict_step(t, x_prev, df, pc):
         cross_contrib_row[k] = contrib
 
     # ── Own non-media ─────────────────────────────────────────
+    # Same per-channel pattern as own media: weibull_lagsum_own_nonmedia
+    # is 0 for any channel left on instant adstock.
     for k, col in enumerate(OWN_NONMEDIA_COLS):
         si = 1+N_MEDIA+N_COMP+k
-        x_p[si] += params["delta_own_nonmedia"][k] * pc["own_nonmedia_vals"][col][t]
+        x_p[si] += pc["weibull_lagsum_own_nonmedia"][t, k] + params["delta_own_nonmedia"][k] * pc["own_nonmedia_vals"][col][t]
         if col in positive_cols:
             x_p[si] = max(x_p[si], 1e-8)
 
     # ── Competitor non-media ──────────────────────────────────
     for k, col in enumerate(COMP_NONMEDIA_COLS):
         si = 1+N_MEDIA+N_COMP+pc["N_OWN_NONMEDIA"]+k
-        x_p[si] += params["delta_comp_nonmedia"][k] * pc["comp_nonmedia_vals"][col][t]
+        x_p[si] += pc["weibull_lagsum_comp_nonmedia"][t, k] + params["delta_comp_nonmedia"][k] * pc["comp_nonmedia_vals"][col][t]
         x_p[si]  = min(x_p[si], -1e-8)
 
     # ── Price ─────────────────────────────────────────────────

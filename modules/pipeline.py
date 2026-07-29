@@ -42,7 +42,8 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
     """
     TARGET_COL = g["TARGET_COL"]; MEDIA_COLS = g["MEDIA_COLS"]
     COMP_MEDIA_COLS = g["COMP_MEDIA_COLS"]; PRICE_COLS = g["PRICE_COLS"]
-    ADSTOCK_TYPE   = g["ADSTOCK_TYPE"]
+    ADSTOCK_MAP    = g.get("ADSTOCK_MAP", {})
+    ADSTOCK_IDX    = g.get("ADSTOCK_IDX", {})
     TRANSFORM_TYPE = g["TRANSFORM_TYPE"]
 
     x_smooth = x_smooth.copy()
@@ -228,12 +229,15 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
             {"Category":"Media","Variable":col,"Parameter":"Delta", "Value":params["delta"][i]},
         ] + transform_rows
 
-        if ADSTOCK_TYPE == "weibull":
+        # Per channel now — only channels individually set to weibull get
+        # adstock shape/scale rows; instant channels' carryover is fully
+        # captured by the "Ls" row above.
+        if ADSTOCK_MAP.get(col) == "weibull" and col in ADSTOCK_IDX:
+            ai = ADSTOCK_IDX[col]
             param_rows += [
-                {"Category":"Media","Variable":col,"Parameter":"Adstock shape k","Value":params["adstock_shape"][i]},
-                {"Category":"Media","Variable":col,"Parameter":"Adstock scale λ","Value":params["adstock_scale"][i]},
+                {"Category":"Media","Variable":col,"Parameter":"Adstock shape k","Value":params["adstock_shape"][ai]},
+                {"Category":"Media","Variable":col,"Parameter":"Adstock scale λ","Value":params["adstock_scale"][ai]},
             ]
-        # Instant mode: no separate adstock row — carryover is the "Ls" row above.
 
     for j, col in enumerate(COMP_MEDIA_COLS):
         param_rows += [
@@ -242,13 +246,37 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
             {"Category":"CompMedia","Variable":col,"Parameter":"n_comp",     "Value":params["n_comp"][j]},
             {"Category":"CompMedia","Variable":col,"Parameter":"S_comp",     "Value":params["S_comp"][j]},
         ]
-        ci = g["N_MEDIA"] + j
-        if ADSTOCK_TYPE == "weibull":
+        if ADSTOCK_MAP.get(col) == "weibull" and col in ADSTOCK_IDX:
+            ai = ADSTOCK_IDX[col]
             param_rows += [
-                {"Category":"CompMedia","Variable":col,"Parameter":"Adstock shape k","Value":params["adstock_shape"][ci]},
-                {"Category":"CompMedia","Variable":col,"Parameter":"Adstock scale λ","Value":params["adstock_scale"][ci]},
+                {"Category":"CompMedia","Variable":col,"Parameter":"Adstock shape k","Value":params["adstock_shape"][ai]},
+                {"Category":"CompMedia","Variable":col,"Parameter":"Adstock scale λ","Value":params["adstock_scale"][ai]},
             ]
         # Instant mode: no separate adstock row — carryover is the "Ls_comp" row above.
+
+    for k, col in enumerate(g["OWN_NONMEDIA_COLS"]):
+        param_rows += [
+            {"Category":"NonMedia","Variable":col,"Parameter":"Ls",    "Value":params["Ls_own_nonmedia"][k]},
+            {"Category":"NonMedia","Variable":col,"Parameter":"Delta", "Value":params["delta_own_nonmedia"][k]},
+        ]
+        if ADSTOCK_MAP.get(col) == "weibull" and col in ADSTOCK_IDX:
+            ai = ADSTOCK_IDX[col]
+            param_rows += [
+                {"Category":"NonMedia","Variable":col,"Parameter":"Adstock shape k","Value":params["adstock_shape"][ai]},
+                {"Category":"NonMedia","Variable":col,"Parameter":"Adstock scale λ","Value":params["adstock_scale"][ai]},
+            ]
+
+    for k, col in enumerate(g["COMP_NONMEDIA_COLS"]):
+        param_rows += [
+            {"Category":"CompNonMedia","Variable":col,"Parameter":"Ls_comp_nonmedia",    "Value":params["Ls_comp_nonmedia"][k]},
+            {"Category":"CompNonMedia","Variable":col,"Parameter":"Delta_comp_nonmedia", "Value":params["delta_comp_nonmedia"][k]},
+        ]
+        if ADSTOCK_MAP.get(col) == "weibull" and col in ADSTOCK_IDX:
+            ai = ADSTOCK_IDX[col]
+            param_rows += [
+                {"Category":"CompNonMedia","Variable":col,"Parameter":"Adstock shape k","Value":params["adstock_shape"][ai]},
+                {"Category":"CompNonMedia","Variable":col,"Parameter":"Adstock scale λ","Value":params["adstock_scale"][ai]},
+            ]
 
     for i, col in enumerate(PRICE_COLS):
         param_rows += [
@@ -267,7 +295,7 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
     if g["USE_ORGANIC_DRIFT"]:
         param_rows.append({"Category":"Global","Variable":"Organic drift","Parameter":"mu","Value":params["mu"]})
 
-    if ADSTOCK_TYPE == "weibull":
+    if g.get("ADSTOCK_ANY_WEIBULL"):
         param_rows.append({"Category":"Global","Variable":"Weibull adstock",
                             "Parameter":"n_lags", "Value": g["ADSTOCK_N_LAGS"]})
 

@@ -27,7 +27,39 @@ def _make_globals(cfg: dict):
     g["USE_PRICE"]           = cfg.get("use_price", False)
 
     # ── Adstock & transformation configuration ──────────────────────
-    g["ADSTOCK_TYPE"]        = cfg.get("adstock_type", "instant")   # "instant" | "weibull"
+    # Adstock type is now chosen PER CHANNEL (not one global switch).
+    # "adstock_map" is {channel: "instant"|"weibull"} and may cover any
+    # of MEDIA_COLS / COMP_MEDIA_COLS / OWN_NONMEDIA_COLS / COMP_NONMEDIA_COLS
+    # (PRICE_COLS never get adstock — a same-period elasticity only).
+    # Legacy configs only have a single global "adstock_type" — that value
+    # becomes the default for any channel not explicitly listed in the map.
+    legacy_default = cfg.get("adstock_type", "instant")
+    _raw_adstock_map = cfg.get("adstock_map", {}) or {}
+    _adstock_eligible = (
+        list(g["MEDIA_COLS"]) + list(g["COMP_MEDIA_COLS"]) +
+        list(g["OWN_NONMEDIA_COLS"]) + list(g["COMP_NONMEDIA_COLS"])
+    )
+    g["ADSTOCK_MAP"] = {
+        col: _raw_adstock_map.get(col, legacy_default)
+        for col in _adstock_eligible
+    }
+    # Ordered list of channels (across all eligible groups) using Weibull —
+    # this fixed order is what the flat theta vector's adstock-shape/scale
+    # block is built from (see modules/bounds.py, modules/kalman.py).
+    g["ADSTOCK_WEIBULL_COLS"] = [
+        col for col in _adstock_eligible if g["ADSTOCK_MAP"].get(col) == "weibull"
+    ]
+    g["ADSTOCK_IDX"] = {col: i for i, col in enumerate(g["ADSTOCK_WEIBULL_COLS"])}
+    # Legacy/global flag kept around for any leftover display code —
+    # "weibull" only if EVERY eligible channel uses weibull, else "instant"
+    # unless nothing is eligible, in which case fall back to the legacy value.
+    if _adstock_eligible:
+        g["ADSTOCK_TYPE"] = ("weibull"
+                              if all(g["ADSTOCK_MAP"][c] == "weibull" for c in _adstock_eligible)
+                              else "instant")
+    else:
+        g["ADSTOCK_TYPE"] = legacy_default
+    g["ADSTOCK_ANY_WEIBULL"] = len(g["ADSTOCK_WEIBULL_COLS"]) > 0
     g["TRANSFORM_TYPE"]      = cfg.get("transform_type", "hill")    # "power"   | "hill"
     g["ADSTOCK_N_LAGS"]      = int(cfg.get("adstock_n_lags", 8))    # only for weibull
     # INTERCEPT_TRANSFORM_TYPE: independent of TRANSFORM_TYPE above — lets the
@@ -83,7 +115,7 @@ def _make_globals(cfg: dict):
     g["N_PRICE"]         = len(g["PRICE_COLS"])
     g["N_DUMMIES"]       = len(g["DUMMY_COLS"])
     g["N_EFFECTORS"]     = len(g["INTERCEPT_EFFECTORS"])
-    g["N_ADSTOCK"]       = g["N_MEDIA"] + g["N_COMP"]
+    g["N_ADSTOCK"]       = len(g["ADSTOCK_WEIBULL_COLS"])
     g["SEASONAL_DIM"]    = 0
 
     g["CROSS_MEDIA_PAIRS"] = [
@@ -107,7 +139,6 @@ def unpack_theta(theta, g: dict):
     N_PRICE = g["N_PRICE"]; N_CROSS = g["N_CROSS"]
     N_EFFECTORS = g["N_EFFECTORS"]; N_ADSTOCK = g["N_ADSTOCK"]
     USE_ORGANIC_DRIFT = g["USE_ORGANIC_DRIFT"]
-    ADSTOCK_TYPE  = g["ADSTOCK_TYPE"]
     TRANSFORM_TYPE = g["TRANSFORM_TYPE"]
 
     idx = 0
@@ -136,18 +167,17 @@ def unpack_theta(theta, g: dict):
     S_intercept = theta[idx:idx+N_EFFECTORS]; idx += N_EFFECTORS
 
     # ── Adstock parameters ────────────────────────────────────────────
-    if ADSTOCK_TYPE == "weibull":
-        adstock_shape  = theta[idx:idx+N_ADSTOCK]; idx += N_ADSTOCK
-        adstock_scale  = theta[idx:idx+N_ADSTOCK]; idx += N_ADSTOCK
-        adstock_lambda = np.zeros(N_ADSTOCK)
-    else:
-        # Instant mode: no adstock lambda is estimated — carryover lives
-        # entirely in Ls (own/comp) persistence. Kept as a zero array only
-        # so downstream code that reads params["adstock_lambda"] (e.g.
-        # legacy display code) doesn't break; it is not consumed from theta.
-        adstock_lambda = np.zeros(N_ADSTOCK)
-        adstock_shape  = np.full(N_ADSTOCK, 1.5)
-        adstock_scale  = np.full(N_ADSTOCK, 1.0)
+    # N_ADSTOCK now = number of channels ACROSS ALL GROUPS (own media,
+    # comp media, own non-media, comp non-media) that are individually set
+    # to "weibull" — g["ADSTOCK_WEIBULL_COLS"] gives the fixed column order
+    # this block follows. Channels left on "instant" carry over entirely
+    # via their own Ls persistence and simply have no entry here at all
+    # (this block shrinks/grows with how many channels are on weibull,
+    # same variable-length-theta pattern used before, just no longer
+    # all-or-nothing).
+    adstock_shape  = theta[idx:idx+N_ADSTOCK]; idx += N_ADSTOCK
+    adstock_scale  = theta[idx:idx+N_ADSTOCK]; idx += N_ADSTOCK
+    adstock_lambda = np.zeros(N_ADSTOCK)  # unused; kept only for legacy display code
 
     # ── Non-media / organic ───────────────────────────────────────────
     Ls_own_nonmedia     = theta[idx:idx+N_OWN_NONMEDIA];  idx += N_OWN_NONMEDIA

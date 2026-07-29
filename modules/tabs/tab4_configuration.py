@@ -326,25 +326,51 @@ def render_tab4():
     dcol1, dcol2 = st.columns(2)
 
     with dcol1:
-        st.markdown("#### Adstock (Carry-over)")
-        adstock_choice = st.radio(
-            "Adstock type",
-            ["Instant (Nerlove-Arrow / geometric)", "Delayed (Weibull distributed lag)"],
-            horizontal=False,
-            key="adstock_type_radio",
-            help=(
-                "**Instant**: β_t = λ·β_{t-1} + δ·f(x_t). "
-                "Fast geometric decay — parameter λ ∈ (0,1).\n\n"
-                "**Delayed (Weibull)**: β_t = Σ_{l=0}^{L} w_l·x_{t-l} + δ·f(x_t). "
-                "Weighted lag distribution — parameters shape k, scale λ, "
-                "and number of lags L (0–8)."
-            ),
+        st.markdown("#### Adstock (Carry-over) — per channel")
+        info(
+            "Pick <b>which channels</b> use Delayed (Weibull) adstock and which use "
+            "Instant (Nerlove-Arrow) — you're no longer locked into one choice for "
+            "the whole model. Any channel not placed in either box below defaults "
+            "to <b>Instant</b>. Price variables are always Instant (same-period "
+            "elasticity — no carry-over concept applies)."
         )
-        use_weibull = adstock_choice.startswith("Delayed")
+        adstock_eligible_cols = (
+            list(media) + list(comp_media) + list(non_media) + list(comp_nonmedia)
+        )
+        # Restore any prior per-channel choice (e.g. coming back to this tab)
+        # so re-visiting doesn't silently reset everyone to Instant.
+        _prev_map = st.session_state.get("cfg_adstock_map", {})
+        _default_weibull = [c for c in adstock_eligible_cols if _prev_map.get(c) == "weibull"]
 
-        if use_weibull:
+        weibull_channels = safe_multiselect(
+            "🌀 Weibull (delayed) channels",
+            options=adstock_eligible_cols,
+            default=[c for c in _default_weibull if c in adstock_eligible_cols],
+            key="cfg_weibull_channels",
+            help="β_t = Σ_l w_l·x_{t-l} + δ·f(x_t) — a weighted-lag distribution "
+                 "with parameters shape k and scale λ, fitted per channel.",
+        )
+        instant_options = [c for c in adstock_eligible_cols if c not in weibull_channels]
+        instant_channels = safe_multiselect(
+            "⚡ Instant (Nerlove-Arrow) channels",
+            options=instant_options,
+            default=instant_options,
+            key="cfg_instant_channels",
+            help="β_t = λ·β_{t-1} + δ·f(x_t) — fast geometric decay, "
+                 "parameter λ ∈ (0,1) fitted per channel.",
+        )
+        # Anything left over (e.g. user removed it from the instant box
+        # without adding it to weibull) still defaults to instant.
+        adstock_map = {
+            c: ("weibull" if c in weibull_channels else "instant")
+            for c in adstock_eligible_cols
+        }
+        st.session_state["cfg_adstock_map"] = adstock_map
+        use_weibull = len(weibull_channels) > 0  # summary/equation-box flag only
+
+        if weibull_channels:
             n_lags = st.number_input(
-                "Number of lags to consider (L)",
+                "Number of lags to consider (L) — applies to all Weibull channels",
                 min_value=0, max_value=8, value=8, step=1,
                 key="adstock_n_lags",
                 help=(
@@ -359,8 +385,12 @@ def render_tab4():
                 "Parameters **shape k** and **scale λ** are fitted per channel "
                 "(set bounds below)."
             )
+            st.caption(
+                f"🌀 Weibull: **{', '.join(weibull_channels)}**  ·  "
+                f"⚡ Instant: **{', '.join(instant_channels) or 'none'}**"
+            )
         else:
-            n_lags = 8  # default, unused for instant
+            n_lags = 8  # default, unused when nothing is on weibull
 
     with dcol2:
         st.markdown("#### Transformation (Response Curve)")
@@ -398,37 +428,35 @@ def render_tab4():
         )
         use_hill_intercept = intercept_transform_choice.startswith("Hill")
 
-    # Summary box showing the active state equation
-    adstock_label = "Delayed (Weibull)" if use_weibull else "Instant (λ)"
+    # Summary box showing the active state equation. Adstock is now chosen
+    # PER CHANNEL (adstock_map above) — the transform (Hill/Power) is still
+    # one global choice for all media betas, so the equation shown here is
+    # written generically with "adstock(...)" standing in for whichever
+    # per-channel choice (Σw_l·x_{t-l} or λ·β_{t-1}) that channel actually uses.
     transform_label = "Hill(x; n, S)" if use_hill else "x^n"
     transform_type_str = "hill" if use_hill else "power"
-    adstock_type_str   = "weibull" if use_weibull else "instant"
+    # Legacy global field — kept for old code paths that still read it as a
+    # single flag; "weibull" only if every eligible channel is weibull.
+    adstock_type_str = "weibull" if (adstock_eligible_cols and not instant_channels) else "instant"
     intercept_transform_type_str = "hill" if use_hill_intercept else "power"
 
-    if use_weibull and use_hill:
+    f_label = "Hill(x_{i,t})" if use_hill else "x_{i,t}^n"
+    if use_weibull:
         eq_text = (
-            "β_{i,t} = **Σ w_l · x_{i,t-l}** + δ_i · **Hill(x_{i,t})** "
-            "+ Σ_j δ_{ij} · Hill(x_{j,t})"
+            f"β_{{i,t}} = **adstock_i(x)** + δ_i · **{f_label}** + Σ_j δ_{{ij}} · {f_label.replace('_{i,t}', '_{j,t}')}\n\n"
+            "where **adstock_i(x)** = Σ_l w_l·x_{i,t-l} (channel on Weibull) "
+            "or λ_i·β_{i,t-1} (channel on Instant) — set per channel above."
         )
-        params_text = "Parameters: shape k, scale λ (per lag group), n, S per channel"
-    elif use_weibull and not use_hill:
-        eq_text = (
-            "β_{i,t} = **Σ w_l · x_{i,t-l}** + δ_i · **x_{i,t}^n** "
-            "+ Σ_j δ_{ij} · x_{j,t}^n"
+        params_text = (
+            "Parameters: shape k / scale λ for Weibull channels, λ (decay) for "
+            "Instant channels, plus n" + (", S" if use_hill else "") + " per channel"
         )
-        params_text = "Parameters: shape k, scale λ, n per channel  (n ∈ (0,1))"
-    elif not use_weibull and use_hill:
-        eq_text = (
-            "β_{i,t} = **λ_i · β_{i,t-1}** + δ_i · **Hill(x_{i,t})** "
-            "+ Σ_j δ_{ij} · Hill(x_{j,t})"
-        )
-        params_text = "Parameters: λ (decay), n, S per channel"
     else:
         eq_text = (
-            "β_{i,t} = **λ_i · β_{i,t-1}** + δ_i · **x_{i,t}^n** "
-            "+ Σ_j δ_{ij} · x_{j,t}^n"
+            f"β_{{i,t}} = **λ_i · β_{{i,t-1}}** + δ_i · **{f_label}** "
+            f"+ Σ_j δ_{{ij}} · {f_label.replace('_{i,t}', '_{j,t}')}"
         )
-        params_text = "Parameters: λ (decay), n per channel  (n ∈ (0,1))"
+        params_text = "Parameters: λ (decay), n" + (", S" if use_hill else "") + " per channel"
 
     st.info(f"**Active state equation:** {eq_text}\n\n*{params_text}*")
 
@@ -549,7 +577,7 @@ def render_tab4():
         key_prefix="d1_",
         df=df,
         use_hill=use_hill,
-        use_weibull=use_weibull,
+        adstock_map=adstock_map,
         price_cols=price_vars if use_price else [],
         nonmedia_cols=non_media,
     )
@@ -594,7 +622,7 @@ def render_tab4():
             key_prefix="d2_",
             df=df,
             use_hill=use_hill,
-            use_weibull=use_weibull,
+            adstock_map=adstock_map,
             price_cols=price_vars_2 if use_price_2 else [],
             nonmedia_cols=non_media_2,
         )
@@ -661,6 +689,7 @@ def render_tab4():
                 "positive_beta_cols_2": positive_beta_cols_2,
                 "negative_beta_cols_2": negative_beta_cols_2,
                 "adstock_type": adstock_type_str,
+                "adstock_map": adstock_map,
                 "transform_type": transform_type_str,
                 "intercept_transform_type": intercept_transform_type_str,
                 "adstock_n_lags": int(n_lags),
@@ -682,7 +711,15 @@ def render_tab4():
                 "initial_comp_nonmedia_betas": {c: -0.01   for c in comp_nonmedia},
                 "initial_price_beta":          {c: -0.1    for c in price_vars},
             }
-            combo_label = f"{'Weibull' if use_weibull else 'Instant'} × {'Hill' if use_hill else 'Power'}"
+            n_weibull_ch = sum(1 for v in adstock_map.values() if v == "weibull")
+            n_instant_ch = len(adstock_map) - n_weibull_ch
+            if n_weibull_ch and n_instant_ch:
+                adstock_label_summary = f"Mixed ({n_weibull_ch} Weibull / {n_instant_ch} Instant)"
+            elif n_weibull_ch:
+                adstock_label_summary = "Weibull (all channels)"
+            else:
+                adstock_label_summary = "Instant (all channels)"
+            combo_label = f"{adstock_label_summary} × {'Hill' if use_hill else 'Power'}"
             st.success(
                 f"✅ Saved — {len(media)} own-media · {len(comp_media)} competitor · "
                 f"{len(non_media)} non-media "

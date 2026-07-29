@@ -272,7 +272,6 @@ def _make_response_curve_fig(sel, idx, df, res, g, params, x_max_pct=150,
     Shared by the interactive selector AND the batch PNG export used by
     the 'Download All Results (ZIP)' button, so exported images are
     identical to what's shown on screen."""
-    adstock_type = g["ADSTOCK_TYPE"]
     transform_type = g.get("TRANSFORM_TYPE", "hill")
 
     col_data = df[sel]; x_max = col_data.max() * x_max_pct / 100
@@ -662,7 +661,8 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
     st.markdown("### H · Response Curves")
     params       = res["params"]
     media_list   = g["MEDIA_COLS"]
-    adstock_type = g["ADSTOCK_TYPE"]
+    adstock_map  = g.get("ADSTOCK_MAP", {})
+    adstock_idx  = g.get("ADSTOCK_IDX", {})
 
     if not media_list:
         st.info("No media channels configured.")
@@ -705,13 +705,16 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
         else:
             pc[3].metric("Power n", f"{n_v:.3f}")
             pc[4].metric("", "")
-        if adstock_type == "weibull":
+        sel_is_weibull = adstock_map.get(sel) == "weibull"
+        if sel_is_weibull:
+            ai = adstock_idx.get(sel)
             pc[5].metric("Weibull k/lam",
-                         f"{params['adstock_shape'][idx]:.3f}/{params['adstock_scale'][idx]:.3f}")
+                         f"{params['adstock_shape'][ai]:.3f}/{params['adstock_scale'][ai]:.3f}")
         else:
             pc[5].metric("Ls (persistence)", f"{params['Ls'][idx]:.3f}")
-        if adstock_type == "weibull":
-            ak = params["adstock_shape"][idx]; al = params["adstock_scale"][idx]
+        if sel_is_weibull:
+            ai = adstock_idx.get(sel)
+            ak = params["adstock_shape"][ai]; al = params["adstock_scale"][ai]
             n_lags = int(params.get("adstock_n_lags", 8))
             adstock_label = f"Weibull (k={ak:.3f}, λ={al:.3f}, L={n_lags})"
         else:

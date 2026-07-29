@@ -10,18 +10,29 @@ import streamlit as st
 
 
 def render_per_channel_bounds(channel_cols, comp_cols, key_prefix, df,
-                               use_hill, use_weibull,
+                               use_hill, adstock_map,
                                price_cols=None, nonmedia_cols=None):
     """
     Renders per-channel bound widgets for media/comp-media columns (with
     adstock + transformation bounds) and optionally simplified Ls+delta
     bounds for price and non-media/control columns.
 
+    `adstock_map`: either a plain bool (applied to every channel — kept for
+    backward compatibility with old call sites) or a dict {col: "weibull"|
+    "instant"} giving each channel's OWN adstock choice. Any channel not
+    covered by an eligible group (currently price) never shows adstock
+    controls.
+
     Returns a dict {col: {param: (lo, hi), ...}}.
     """
     price_cols     = price_cols or []
     nonmedia_cols  = nonmedia_cols or []
     bounds: dict   = {}
+
+    def _is_weibull(col):
+        if isinstance(adstock_map, dict):
+            return adstock_map.get(col) == "weibull"
+        return bool(adstock_map)
 
     # ── Media / competitor-media channels ─────────────────────────
     all_adstock_cols = list(channel_cols)
@@ -129,7 +140,7 @@ def render_per_channel_bounds(channel_cols, comp_cols, key_prefix, df,
                 st.divider()
 
                 # Adstock parameters
-                if use_weibull:
+                if _is_weibull(col):
                     st.markdown("**Weibull Adstock — Shape (k) and Scale (λ)**")
                     st.caption(
                         "Shape k controls the weight distribution across lags "
@@ -200,6 +211,32 @@ def render_per_channel_bounds(channel_cols, comp_cols, key_prefix, df,
                     nm_ls_hi = st.number_input("Ls max", 0.0, 1.0, 0.8, 0.01,
                                                 key=f"{key_prefix}nm_ls_hi_{col}")
                 bounds[col]["ls"] = (nm_ls_lo, nm_ls_hi)
-                st.caption(f"✅ Bounds set for: {', '.join(bounds[col].keys())}")
+                st.divider()
+
+                if _is_weibull(col):
+                    st.markdown("**Weibull Adstock — Shape (k) and Scale (λ)**")
+                    st.caption(
+                        "Shape k controls the weight distribution across lags "
+                        "(k < 1: front-loaded, k = 1: exponential, k > 1: bell-shaped). "
+                        "Scale λ controls how quickly weights decay."
+                    )
+                    nwa1, nwa2, nwa3, nwa4 = st.columns(4)
+                    with nwa1: nwa_klo = st.number_input("k min", 0.01, 10.0, 0.1, 0.1,
+                                                          key=f"{key_prefix}nwa_klo_{col}")
+                    with nwa2: nwa_khi = st.number_input("k max", 0.01, 10.0, 5.0, 0.1,
+                                                          key=f"{key_prefix}nwa_khi_{col}")
+                    with nwa3: nwl_lo  = st.number_input("λ min", 0.01, 10.0, 0.1, 0.1,
+                                                          key=f"{key_prefix}nwl_lo_{col}")
+                    with nwa4: nwl_hi  = st.number_input("λ max", 0.01, 10.0, 5.0, 0.1,
+                                                          key=f"{key_prefix}nwl_hi_{col}")
+                    bounds[col]["adstock_shape"] = (nwa_klo, nwa_khi)
+                    bounds[col]["adstock_scale"] = (nwl_lo,  nwl_hi)
+                else:
+                    st.caption(
+                        "ℹ️ Instant adstock has no separate λ decay parameter — "
+                        "carryover is carried entirely by this channel's **Beta "
+                        "Persistence (Ls)** above."
+                    )
+                st.caption(f"✅ Bounds set for: {', '.join(k for k in bounds[col].keys() if not k.startswith('__'))}")
 
     return bounds

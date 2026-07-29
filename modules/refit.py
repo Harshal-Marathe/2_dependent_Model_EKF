@@ -59,12 +59,23 @@ ROLE_PARAM_BLOCK = {
     ("comp_media", "adstock_shape"): "adstock_shape", ("comp_media", "adstock_scale"): "adstock_scale",
     ("price", "ls"): "Ls_price",
     ("non_media", "ls"): "Ls_own_nonmedia",
+    ("non_media", "adstock_shape"): "adstock_shape", ("non_media", "adstock_scale"): "adstock_scale",
     ("comp_nonmedia", "ls"): "Ls_comp_nonmedia",
+    ("comp_nonmedia", "adstock_shape"): "adstock_shape", ("comp_nonmedia", "adstock_scale"): "adstock_scale",
 }
 
 
-def add_variable_to_config(base_config: dict, col: str, role: str, bounds_dict: dict | None):
-    """Return a NEW config dict with `col` appended to the right role list."""
+def add_variable_to_config(base_config: dict, col: str, role: str, bounds_dict: dict | None,
+                            adstock_choice: str | None = None):
+    """Return a NEW config dict with `col` appended to the right role list.
+
+    `adstock_choice`: "weibull" | "instant" | None — this channel's OWN
+    adstock choice (only meaningful for media/comp_media/non_media/
+    comp_nonmedia roles; price never gets an adstock option). If given,
+    stored into cfg["adstock_map"][col] so the per-channel choice made
+    here survives into modules/params.py::_make_globals exactly like a
+    channel configured in Tab 5. Defaults to "instant" if not given.
+    """
     cfg = copy.deepcopy(base_config)
     bounds_dict = bounds_dict or {}
 
@@ -95,14 +106,23 @@ def add_variable_to_config(base_config: dict, col: str, role: str, bounds_dict: 
     if bounds_dict:
         cfg["per_channel_bounds"] = dict(cfg.get("per_channel_bounds", {}))
         cfg["per_channel_bounds"][col] = dict(bounds_dict)
+    if role != "price":
+        cfg["adstock_map"] = dict(cfg.get("adstock_map", {}))
+        cfg["adstock_map"][col] = adstock_choice if adstock_choice in ("weibull", "instant") else "instant"
     return cfg
 
 
-def apply_bound_adjustment(base_config: dict, col: str, bounds_dict: dict):
-    """Return a NEW config dict with `col`'s per_channel_bounds overridden."""
+def apply_bound_adjustment(base_config: dict, col: str, bounds_dict: dict,
+                            adstock_choice: str | None = None):
+    """Return a NEW config dict with `col`'s per_channel_bounds overridden
+    (and, if given, `col`'s adstock choice updated too — reopening a
+    channel in Tab 8 lets you flip it between Weibull/Instant)."""
     cfg = copy.deepcopy(base_config)
     cfg["per_channel_bounds"] = dict(cfg.get("per_channel_bounds", {}))
     cfg["per_channel_bounds"][col] = dict(bounds_dict)
+    if adstock_choice in ("weibull", "instant"):
+        cfg["adstock_map"] = dict(cfg.get("adstock_map", {}))
+        cfg["adstock_map"][col] = adstock_choice
     return cfg
 
 
@@ -141,8 +161,12 @@ def _block_slices(g: dict):
     N_MEDIA = g["N_MEDIA"]; N_COMP = g["N_COMP"]
     N_OWN_NONMEDIA = g["N_OWN_NONMEDIA"]; N_COMP_NONMEDIA = g["N_COMP_NONMEDIA"]
     N_PRICE = g["N_PRICE"]; N_CROSS = g["N_CROSS"]; N_EFFECTORS = g["N_EFFECTORS"]
-    ADSTOCK_TYPE = g["ADSTOCK_TYPE"]; USE_ORGANIC_DRIFT = g["USE_ORGANIC_DRIFT"]
-    N_ADSTOCK = N_MEDIA + N_COMP
+    USE_ORGANIC_DRIFT = g["USE_ORGANIC_DRIFT"]
+    # Per-channel now: only channels individually on "weibull" (in ANY of
+    # media/comp_media/own_nonmedia/comp_nonmedia) get a shape/scale slot,
+    # in the fixed order g["ADSTOCK_WEIBULL_COLS"] (see modules/params.py).
+    adstock_weibull_cols = g.get("ADSTOCK_WEIBULL_COLS", [])
+    N_ADSTOCK = len(adstock_weibull_cols)
 
     blocks = []
     idx = 0
@@ -161,10 +185,9 @@ def _block_slices(g: dict):
     add("S_params", N_MEDIA, cols=g["MEDIA_COLS"])
     add("n_intercept", N_EFFECTORS, cols=g["INTERCEPT_EFFECTORS"])
     add("S_intercept", N_EFFECTORS, cols=g["INTERCEPT_EFFECTORS"])
-    if ADSTOCK_TYPE == "weibull":
-        adstock_cols = list(g["MEDIA_COLS"]) + list(g["COMP_MEDIA_COLS"])
-        add("adstock_shape", N_ADSTOCK, cols=adstock_cols)
-        add("adstock_scale", N_ADSTOCK, cols=adstock_cols)
+    if N_ADSTOCK:
+        add("adstock_shape", N_ADSTOCK, cols=adstock_weibull_cols)
+        add("adstock_scale", N_ADSTOCK, cols=adstock_weibull_cols)
     add("Ls_own_nonmedia", N_OWN_NONMEDIA, cols=g["OWN_NONMEDIA_COLS"])
     add("Ls_comp_nonmedia", N_COMP_NONMEDIA, cols=g["COMP_NONMEDIA_COLS"])
     add("delta_own_nonmedia", N_OWN_NONMEDIA, cols=g["OWN_NONMEDIA_COLS"])
@@ -250,8 +273,7 @@ def build_warm_started_theta(g_new, theta0_default, bounds_default,
             old_keys = prev_g.get("CROSS_MEDIA_PAIRS", [])
         elif name in ("adstock_shape", "adstock_scale"):
             new_keys = blk["cols"]
-            old_keys = (list(prev_g["MEDIA_COLS"]) + list(prev_g["COMP_MEDIA_COLS"])
-                        if prev_g.get("ADSTOCK_TYPE") == "weibull" else [])
+            old_keys = prev_g.get("ADSTOCK_WEIBULL_COLS", [])
         else:
             new_keys = blk["cols"]
             old_keys = prev_g.get(_BLOCK_TO_GKEY[name], [])
@@ -286,7 +308,7 @@ def get_current_value(result, col, block_name):
     `col`, read out of a result dict's params/g — or None if not found."""
     g = result["g"]; params = result["params"]
     if block_name in ("adstock_shape", "adstock_scale"):
-        cols = list(g["MEDIA_COLS"]) + list(g["COMP_MEDIA_COLS"])
+        cols = g.get("ADSTOCK_WEIBULL_COLS", [])
     else:
         gkey = _BLOCK_TO_GKEY.get(block_name)
         cols = g.get(gkey) if gkey else None
@@ -302,12 +324,19 @@ def get_current_value(result, col, block_name):
         return None
 
 
-def editable_params_for_role(role, g):
+def editable_params_for_role(role, g, col=None):
     """(block_name, display_label, is_unit_interval) tuples of the
     parameters that make sense to manually override for a variable of
-    this role, given the model's transform/adstock type."""
+    this role, given the model's transform type and — since adstock is
+    now chosen PER CHANNEL — this specific channel's own adstock choice
+    (pass `col`; if omitted, falls back to "any channel is on weibull",
+    matching the old global behaviour, for backward-compat callers)."""
     transform_hill = g.get("TRANSFORM_TYPE", "hill") == "hill"
-    weibull = g.get("ADSTOCK_TYPE", "instant") == "weibull"
+    adstock_map = g.get("ADSTOCK_MAP", {})
+    if col is not None:
+        weibull = adstock_map.get(col) == "weibull"
+    else:
+        weibull = g.get("ADSTOCK_ANY_WEIBULL", g.get("ADSTOCK_TYPE", "instant") == "weibull")
 
     if role in ("media", "comp_media"):
         is_comp = role == "comp_media"
@@ -330,11 +359,19 @@ def editable_params_for_role(role, g):
         return [("Ls_price", "Beta persistence (Ls_price)", True),
                 ("delta_price", "Delta_price", False)]
     if role == "non_media":
-        return [("Ls_own_nonmedia", "Beta persistence (Ls)", True),
-                ("delta_own_nonmedia", "Delta", False)]
+        specs = [("Ls_own_nonmedia", "Beta persistence (Ls)", True),
+                 ("delta_own_nonmedia", "Delta", False)]
+        if weibull:
+            specs += [("adstock_shape", "Adstock shape (k)", False),
+                      ("adstock_scale", "Adstock scale (λ)", False)]
+        return specs
     if role == "comp_nonmedia":
-        return [("Ls_comp_nonmedia", "Beta persistence (Ls_comp_nonmedia)", True),
-                ("delta_comp_nonmedia", "Delta_comp_nonmedia", False)]
+        specs = [("Ls_comp_nonmedia", "Beta persistence (Ls_comp_nonmedia)", True),
+                 ("delta_comp_nonmedia", "Delta_comp_nonmedia", False)]
+        if weibull:
+            specs += [("adstock_shape", "Adstock shape (k)", False),
+                      ("adstock_scale", "Adstock scale (λ)", False)]
+        return specs
     return []
 
 

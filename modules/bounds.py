@@ -15,7 +15,6 @@ def _build_theta0_and_bounds(df, g):
     N_PRICE = g["N_PRICE"]; N_CROSS = g["N_CROSS"]; N_EFFECTORS = g["N_EFFECTORS"]
     MEDIA_COLS = g["MEDIA_COLS"]; COMP_MEDIA_COLS = g["COMP_MEDIA_COLS"]
     USE_ORGANIC_DRIFT = g["USE_ORGANIC_DRIFT"]
-    ADSTOCK_TYPE  = g["ADSTOCK_TYPE"]
     TRANSFORM_TYPE = g["TRANSFORM_TYPE"]
     POSITIVE_BETA_COLS = g.get("POSITIVE_BETA_COLS", [])
     NEGATIVE_BETA_COLS = g.get("NEGATIVE_BETA_COLS", [])
@@ -93,10 +92,17 @@ def _build_theta0_and_bounds(df, g):
                         for c in INTERCEPT_EFFECTORS]
 
     # ── Adstock parameters ────────────────────────────────────────────
-    all_adstock_cols = list(MEDIA_COLS) + list(COMP_MEDIA_COLS)
+    # Per-channel now: only channels individually set to "weibull" (in any
+    # group — own media, comp media, own non-media, comp non-media) get a
+    # shape/scale slot, in the fixed order given by ADSTOCK_WEIBULL_COLS
+    # (built in modules/params.py::_make_globals). Channels left on
+    # "instant" carry over entirely via their own Ls persistence — adding a
+    # second, separately-fitted decay on top of Ls would double-count the
+    # same carryover, so they get no slot at all here.
+    all_adstock_cols = g.get("ADSTOCK_WEIBULL_COLS", [])
     N_ADSTOCK = len(all_adstock_cols)
 
-    if ADSTOCK_TYPE == "weibull":
+    if N_ADSTOCK:
         # shape k: (0.1, 5.0), scale lambda: (0.1, 5.0) — user can tighten via PCB
         shape_bounds = [_b(c, "adstock_shape", 0.1, 5.0) for c in all_adstock_cols]
         scale_bounds = [_b(c, "adstock_scale", 0.1, 5.0) for c in all_adstock_cols]
@@ -104,11 +110,6 @@ def _build_theta0_and_bounds(df, g):
                           [np.clip(1.0, lo, hi) for lo, hi in scale_bounds])
         adstock_bounds = shape_bounds + scale_bounds
     else:
-        # Instant (Nerlove-Arrow): no adstock lambda is estimated at all.
-        # Carryover for every state (own media, comp media, and — via the
-        # target beta it lands in — synergy) is carried entirely by that
-        # state's own Ls persistence. Adding a second, separately-fitted
-        # decay here on top of Ls would double-count the same carryover.
         adstock_init   = []
         adstock_bounds = []
 
