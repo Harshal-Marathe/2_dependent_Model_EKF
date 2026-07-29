@@ -55,30 +55,39 @@ def _build_variable_index(g):
 def build_intercept_decomposition_df(res, df_full):
     """Period-by-period decomposition of the intercept's own state equation.
 
-    Power (default):
+    Carryover dynamics (default) + Power:
         I_t = G0 * I_(t-1)  +  Sum_k gamma_k * media_k,t^(n_k_intercept)
 
-    Hill:
+    Carryover dynamics (default) + Hill:
         I_t = G0 * I_(t-1)  +  Sum_k gamma_k *
                   media_k,t^(n_k_intercept) /
                   (media_k,t^(n_k_intercept) + S_k_intercept^(n_k_intercept))
 
-    Which one applies is set independently of the media betas' own
-    Transform Type, via config "intercept_transform_type"
-    (g["INTERCEPT_TRANSFORM_TYPE"]) — see modules/kalman.py's module
-    docstring. Every intercept-effector column is transformed the same
-    way, whether or not it's also a media channel with its own beta.
+    Simple dynamics (no carryover) — same Power/Hill choice, but I0 (a
+    fitted constant) replaces G0 * I_(t-1):
+        I_t = I0  +  Sum_k gamma_k * media_k,t^(n_k_intercept)              [Power]
+        I_t = I0  +  Sum_k gamma_k * media_k,t^n / (media_k,t^n + S_k^n)    [Hill]
+
+    Transform Type (Power/Hill) is set via config "intercept_transform_type"
+    (g["INTERCEPT_TRANSFORM_TYPE"]); Dynamics Type (Carryover/Simple) via
+    config "intercept_dynamics_type" (g["INTERCEPT_DYNAMICS_TYPE"]) — the
+    two are independent. See modules/kalman.py's module docstring. Every
+    intercept-effector column is transformed the same way, whether or not
+    it's also a media channel with its own beta.
 
     Column order (left to right): Period, then for each intercept-effector
     channel a Media_<name> / Transformed_<name> / GammaXTransformed_<name>
-    trio, then Intercept_Carryover (G0 * I_(t-1)) and Intercept_at_t (the
-    full smoothed intercept level, I_t) as the last two columns.
+    trio, then Intercept_Carryover (G0 * I_(t-1); all-zero in Simple mode),
+    Intercept_Baseline_I0 (Simple mode only), and Intercept_at_t (the full
+    smoothed intercept level, I_t) as the last column(s).
     """
     g = res["g"]; params = res["params"]; x_smooth = res["x_smooth"]
     INTERCEPT_TRANSFORM_TYPE = g.get("INTERCEPT_TRANSFORM_TYPE", "power")
+    INTERCEPT_DYNAMICS_TYPE = g.get("INTERCEPT_DYNAMICS_TYPE", "carryover")
     T = len(df_full)
 
     G0 = float(params["G0"])
+    I0 = float(params.get("I0", 0.0))
     prev_intercept = np.empty(T)
     prev_intercept[1:] = x_smooth[:-1, 0]
     prev_intercept[0]  = x_smooth[0, 0]
@@ -104,9 +113,14 @@ def build_intercept_decomposition_df(res, df_full):
         media_cols.append(media_name); trans_cols.append(trans_name); gxt_cols.append(gxt_name)
 
     data["Intercept_Carryover"] = intercept_carryover
+    tail_cols = ["Intercept_Carryover"]
+    if INTERCEPT_DYNAMICS_TYPE == "simple":
+        data["Intercept_Baseline_I0"] = np.full(T, I0)
+        tail_cols.append("Intercept_Baseline_I0")
     data["Intercept_at_t"] = intercept_at_t
+    tail_cols.append("Intercept_at_t")
 
-    ordered = ["Period"] + media_cols + trans_cols + gxt_cols + ["Intercept_Carryover", "Intercept_at_t"]
+    ordered = ["Period"] + media_cols + trans_cols + gxt_cols + tail_cols
     return pd.DataFrame(data)[ordered]
 
 
@@ -172,6 +186,7 @@ _INTERCEPT_BLOCK_COLORS = {
     "Transformed_":          "16A34A",  # green  — same convention as Model_Data
     "GammaXTransformed_":    "9333EA",  # purple — same convention as Contribution_
     "Intercept_Carryover":   "F97316",  # orange — the G0 * I_(t-1) piece
+    "Intercept_Baseline_I0": "EA580C",  # dark orange — the I0 constant (simple/no-carryover mode)
     "Intercept_at_t":        "DC2626",  # red    — the resulting full intercept level
 }
 
@@ -238,35 +253,47 @@ def build_master_workbook_bytes(res, config, df_full):
     synergy_df = res.get("synergy_df")
     has_synergy = synergy_df is not None and not synergy_df.empty
 
-    legend_df = pd.DataFrame({
-        "Block": ["Raw_*", "Transformed_*", "Beta_*", "Contribution_*",
-                  "Media_* (Intercept_Decomposition)", "Transformed_* (Intercept_Decomposition)",
-                  "GammaXTransformed_*", "Intercept_Carryover", "Intercept_at_t"],
-        "Meaning": [
-            "The variable's original value, as uploaded / merged into the dataset.",
-            "What the model actually multiplies the beta by. For media and "
-            "competitor media this is the adstocked (carry-over adjusted) spend. "
-            "For every other variable type, no transform is applied, so this "
-            "equals Raw.",
-            "The RBE's smoothed, time-varying coefficient for that variable.",
-            "Beta x Transformed for that variable and period — its modeled "
-            "contribution to the target KPI in that period.",
-            "Raw value of an intercept-effector channel (e.g. SEO spends, TV Grp) "
-            "for that period — same underlying number as Model_Data's Raw_*, "
-            "repeated here for readability.",
-            "The intercept-effector's raw value run through its own n_intercept "
-            "(and, in Hill mode, S_intercept) transform, per the Intercept "
-            "Transform Type — Power or Hill — chosen independently of the "
-            "media betas' own Transform Type above.",
-            "gamma_k * Transformed_* — that channel's boost contribution to the "
-            "intercept's state equation for that period.",
-            "G0 * Intercept_(t-1) — the persisted/carried-over piece of the "
-            "intercept's state equation.",
-            "The full smoothed intercept level, I_t = Intercept_Carryover + "
-            "Sum_k GammaXTransformed_k (up to Kalman process noise / baseline "
-            "flooring) — this is what enters the observation equation as-is.",
-        ],
-    })
+    _legend_dynamics_type = res["g"].get("INTERCEPT_DYNAMICS_TYPE", "carryover")
+    _legend_blocks = ["Raw_*", "Transformed_*", "Beta_*", "Contribution_*",
+                       "Media_* (Intercept_Decomposition)", "Transformed_* (Intercept_Decomposition)",
+                       "GammaXTransformed_*", "Intercept_Carryover"]
+    _legend_meanings = [
+        "The variable's original value, as uploaded / merged into the dataset.",
+        "What the model actually multiplies the beta by. For media and "
+        "competitor media this is the adstocked (carry-over adjusted) spend. "
+        "For every other variable type, no transform is applied, so this "
+        "equals Raw.",
+        "The RBE's smoothed, time-varying coefficient for that variable.",
+        "Beta x Transformed for that variable and period — its modeled "
+        "contribution to the target KPI in that period.",
+        "Raw value of an intercept-effector channel (e.g. SEO spends, TV Grp) "
+        "for that period — same underlying number as Model_Data's Raw_*, "
+        "repeated here for readability.",
+        "The intercept-effector's raw value run through its own n_intercept "
+        "(and, in Hill mode, S_intercept) transform, per the Intercept "
+        "Transform Type — Power or Hill — chosen independently of the "
+        "media betas' own Transform Type above.",
+        "gamma_k * Transformed_* — that channel's boost contribution to the "
+        "intercept's state equation for that period.",
+        "G0 * Intercept_(t-1) — the persisted/carried-over piece of the "
+        "intercept's state equation. Always 0 when Intercept Dynamics is set "
+        "to Simple (no carryover) — see Intercept_Baseline_I0 below instead.",
+    ]
+    if _legend_dynamics_type == "simple":
+        _legend_blocks.append("Intercept_Baseline_I0")
+        _legend_meanings.append(
+            "I0 — the fitted constant baseline level used instead of a carried-"
+            "over term when Intercept Dynamics is set to Simple (no carryover): "
+            "I_t = I0 + Sum_k GammaXTransformed_k, with no dependence on I_(t-1)."
+        )
+    _legend_blocks.append("Intercept_at_t")
+    _legend_meanings.append(
+        "The full smoothed intercept level, I_t = Intercept_Carryover "
+        + ("+ Intercept_Baseline_I0 " if _legend_dynamics_type == "simple" else "")
+        + "+ Sum_k GammaXTransformed_k (up to Kalman process noise / baseline "
+        "flooring) — this is what enters the observation equation as-is."
+    )
+    legend_df = pd.DataFrame({"Block": _legend_blocks, "Meaning": _legend_meanings})
 
     buffer = io.BytesIO()
     with pd.ExcelWriter(buffer, engine="openpyxl") as writer:

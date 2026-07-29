@@ -71,6 +71,18 @@ def _make_globals(cfg: dict):
     # See modules/kalman.py module docstring for both full equations.
     g["INTERCEPT_TRANSFORM_TYPE"] = cfg.get("intercept_transform_type", "power")  # "power" | "hill"
 
+    # INTERCEPT_DYNAMICS_TYPE: independent of INTERCEPT_TRANSFORM_TYPE above —
+    # controls whether the intercept state carries over period-to-period at
+    # all. "carryover" (default, original behaviour):
+    #     I_t = G0 * I_(t-1) + Σ_k gamma_k * f(media_k,t)
+    # "simple" (no persistence — pure regression on current-period effectors):
+    #     I_t = I0 + Σ_k gamma_k * f(media_k,t)
+    # In "simple" mode G0 is fixed at 0 (no theta slot) and a fitted constant
+    # I0 takes its place. For the 2-dependent joint model, "simple" also
+    # switches off the cross-intercept coupling (phi_1/phi_2) — see
+    # modules/pipeline.py::run_multi_dependent_pipeline.
+    g["INTERCEPT_DYNAMICS_TYPE"] = cfg.get("intercept_dynamics_type", "carryover")  # "carryover" | "simple"
+
     g["POSITIVE_BETA_COLS"]  = cfg.get("positive_beta_cols", [])
     g["NEGATIVE_BETA_COLS"]  = cfg.get("negative_beta_cols", [])
     g["PER_CHANNEL_BOUNDS"]  = cfg.get("per_channel_bounds", {})
@@ -140,12 +152,23 @@ def unpack_theta(theta, g: dict):
     N_EFFECTORS = g["N_EFFECTORS"]; N_ADSTOCK = g["N_ADSTOCK"]
     USE_ORGANIC_DRIFT = g["USE_ORGANIC_DRIFT"]
     TRANSFORM_TYPE = g["TRANSFORM_TYPE"]
+    INTERCEPT_DYNAMICS_TYPE = g.get("INTERCEPT_DYNAMICS_TYPE", "carryover")
 
     idx = 0
 
     # ── Beta-persistence (Ls) for own media ─────────────────────────
     Ls       = theta[idx:idx+N_MEDIA];     idx += N_MEDIA
-    G0       = theta[idx];                 idx += 1
+    # ── Intercept dynamics: G0 (carryover) XOR I0 (simple regression) ──
+    # Exactly one of the two occupies a theta slot here, mirroring the
+    # USE_ORGANIC_DRIFT/mu variable-length pattern below. See
+    # modules/params.py::_make_globals and modules/kalman.py module
+    # docstring for the two equations this switches between.
+    if INTERCEPT_DYNAMICS_TYPE == "simple":
+        G0 = 0.0
+        I0 = theta[idx];                   idx += 1
+    else:
+        G0 = theta[idx];                   idx += 1
+        I0 = 0.0
     delta    = theta[idx:idx+N_MEDIA];     idx += N_MEDIA
     gamma    = theta[idx:idx+N_EFFECTORS]; idx += N_EFFECTORS
 
@@ -207,7 +230,7 @@ def unpack_theta(theta, g: dict):
     sigma_y = abs(theta[idx])
 
     return dict(
-        Ls=Ls, G0=G0, delta=delta, gamma=gamma,
+        Ls=Ls, G0=G0, I0=I0, delta=delta, gamma=gamma,
         n_params=n_params, S_params=S_params,
         n_intercept=n_intercept, S_intercept=S_intercept,
         adstock_lambda=adstock_lambda,

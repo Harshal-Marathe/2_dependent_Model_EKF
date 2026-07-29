@@ -428,6 +428,32 @@ def render_tab4():
         )
         use_hill_intercept = intercept_transform_choice.startswith("Hill")
 
+        st.markdown("#### Intercept Dynamics")
+        intercept_dynamics_choice = st.radio(
+            "Intercept dynamics type",
+            ["With carryover (AR(1) baseline)", "Without carryover (simple regression)"],
+            horizontal=False,
+            key="intercept_dynamics_type_radio",
+            help=(
+                "Independent of the Intercept Transformation above — this "
+                "controls whether the intercept/baseline PERSISTS from one "
+                "period to the next at all.\n\n"
+                "**With carryover** (default): I_t = G0 · I_{t-1} + "
+                "Σ_k γ_k · f(media_k,t). The baseline has its own AR(1) "
+                "memory (persistence G0), on top of the effector boost.\n\n"
+                "**Without carryover**: I_t = I0 + Σ_k γ_k · f(media_k,t). "
+                "A plain regression on the current period's effectors "
+                "around a fitted constant I0 — no dependence on the "
+                "previous period's intercept at all.\n\n"
+                "For a 2-dependent-variable model, this also switches off "
+                "the cross-intercept coupling (φ₁/φ₂) between the two "
+                "equations, since that coupling is itself a carryover "
+                "mechanism (it references the OTHER equation's PREVIOUS "
+                "intercept)."
+            ),
+        )
+        use_simple_intercept = intercept_dynamics_choice.startswith("Without")
+
     # Summary box showing the active state equation. Adstock is now chosen
     # PER CHANNEL (adstock_map above) — the transform (Hill/Power) is still
     # one global choice for all media betas, so the equation shown here is
@@ -439,6 +465,7 @@ def render_tab4():
     # single flag; "weibull" only if every eligible channel is weibull.
     adstock_type_str = "weibull" if (adstock_eligible_cols and not instant_channels) else "instant"
     intercept_transform_type_str = "hill" if use_hill_intercept else "power"
+    intercept_dynamics_type_str = "simple" if use_simple_intercept else "carryover"
 
     f_label = "Hill(x_{i,t})" if use_hill else "x_{i,t}^n"
     if use_weibull:
@@ -460,16 +487,18 @@ def render_tab4():
 
     st.info(f"**Active state equation:** {eq_text}\n\n*{params_text}*")
 
+    _intercept_lead = "I0" if use_simple_intercept else "G₀ · I_{t-1}"
     if use_hill_intercept:
         intercept_eq_text = (
-            "I_t = G₀ · I_{t-1} + Σ_k γ_k · "
+            f"I_t = {_intercept_lead} + Σ_k γ_k · "
             "media_k,t^{n_k} / (media_k,t^{n_k} + S_k^{n_k})   *(Hill)*"
         )
     else:
         intercept_eq_text = (
-            "I_t = G₀ · I_{t-1} + Σ_k γ_k · media_k,t^{n_k}   *(Power)*"
+            f"I_t = {_intercept_lead} + Σ_k γ_k · media_k,t^{{n_k}}   *(Power)*"
         )
-    st.markdown(f"**Intercept state (all modes):** {intercept_eq_text}")
+    _dynamics_label = "Simple / no carryover" if use_simple_intercept else "With carryover"
+    st.markdown(f"**Intercept state ({_dynamics_label}):** {intercept_eq_text}")
 
     st.divider()
 
@@ -692,6 +721,7 @@ def render_tab4():
                 "adstock_map": adstock_map,
                 "transform_type": transform_type_str,
                 "intercept_transform_type": intercept_transform_type_str,
+                "intercept_dynamics_type": intercept_dynamics_type_str,
                 "adstock_n_lags": int(n_lags),
                 "use_organic": use_organic,
                 "use_price": use_price,

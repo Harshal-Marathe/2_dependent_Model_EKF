@@ -172,8 +172,11 @@ def render_tab7():
                 help="Recommended — residual variance usually shifts slightly "
                      "once a new variable explains part of it.")
             refit_G0 = st.checkbox(
-                "Also re-optimize global intercept persistence (G0)", value=False,
-                key="refit_G0")
+                "Also re-optimize global intercept persistence/baseline (G0 or I0)",
+                value=False, key="refit_G0",
+                help="Covers whichever of the two applies to this model's "
+                     "Intercept Dynamics setting — G0 (Carryover mode) or "
+                     "I0 (Simple/no-carryover mode).")
         freeze_existing = st.checkbox(
             "🔒 Freeze all previously-fitted parameters (recommended)", value=True,
             key="refit_freeze",

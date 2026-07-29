@@ -99,6 +99,7 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
     contrib_df = df_full[[TARGET_COL]].copy()
 
     G0 = float(params["G0"])
+    I0 = float(params.get("I0", 0.0))
     prev_intercept = np.empty(len(df_full))
     prev_intercept[1:] = x_smooth[:-1, 0]
     prev_intercept[0]  = x_smooth[0, 0]
@@ -110,11 +111,18 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
     contrib_df["ShortTerm_Intercept"] = x_smooth[:, 0]
 
     # Long-term view: decompose that SAME intercept per its own state
-    # equation, I_t = G0 * I_(t-1) + Σ_k gamma_k * media_k,t^n_k_intercept,
-    # into a carryover piece and (below) a per-effector boost piece. Named
-    # "Intercept Carryover" (not "Intercept") so it doesn't collide with the
-    # short-term "Intercept" row when Short-Term + Long-Term are combined.
+    # equation into a persistence/baseline piece and (below) a per-effector
+    # boost piece. Named "Intercept Carryover" (not "Intercept") so it
+    # doesn't collide with the short-term "Intercept" row when Short-Term +
+    # Long-Term are combined.
+    #   Carryover dynamics: I_t = G0 * I_(t-1) + Σ_k gamma_k * f(media_k,t)
+    #   Simple dynamics:    I_t = I0           + Σ_k gamma_k * f(media_k,t)
+    # In "simple" mode G0 is 0 so intercept_carryover is already all-zero;
+    # the constant I0 baseline is broken out into its own column instead so
+    # the long-term pieces still sum to the full intercept level.
     contrib_df["LongTerm_Intercept Carryover"] = intercept_carryover
+    if g.get("INTERCEPT_DYNAMICS_TYPE", "carryover") == "simple":
+        contrib_df["LongTerm_Intercept Baseline (I0)"] = np.full(len(df_full), I0)
 
     for i, col in enumerate(MEDIA_COLS):
         # Matches the observation equation: β_i,t is multiplied by RAW spend/
@@ -290,7 +298,10 @@ def _postprocess_equation(df_full, g, params, x_smooth, adstocked_media,
             {"Category":"Synergy","Variable":pair_label,"Parameter":"Cross Hill n","Value":params["cross_n"][k]},
             {"Category":"Synergy","Variable":pair_label,"Parameter":"Cross Hill S","Value":params["cross_S"][k]},
         ]
-    param_rows.append({"Category":"Global","Variable":"Intercept","Parameter":"G0",     "Value":params["G0"]})
+    if g.get("INTERCEPT_DYNAMICS_TYPE", "carryover") == "simple":
+        param_rows.append({"Category":"Global","Variable":"Intercept","Parameter":"I0",     "Value":params.get("I0", 0.0)})
+    else:
+        param_rows.append({"Category":"Global","Variable":"Intercept","Parameter":"G0",     "Value":params["G0"]})
     param_rows.append({"Category":"Global","Variable":"Noise",    "Parameter":"sigma_y","Value":params["sigma_y"]})
     if g["USE_ORGANIC_DRIFT"]:
         param_rows.append({"Category":"Global","Variable":"Organic drift","Parameter":"mu","Value":params["mu"]})
@@ -448,10 +459,26 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     # Cross-intercept coupling — see modules/kalman.py module docstring:
     #   Intercept_1,t = G0_1·Intercept_1,t-1 + phi_1·Intercept_2,t-1 + effectors_1,t
     #   Intercept_2,t = G0_2·Intercept_2,t-1 + phi_2·Intercept_1,t-1 + effectors_2,t
+    # phi is itself a carryover mechanism (it references the OTHER
+    # equation's PREVIOUS intercept), so it only makes sense — and only
+    # gets a theta slot — when both equations are on "carryover" intercept
+    # dynamics. Both g1/g2 share the one "intercept_dynamics_type" config
+    # value (no per-dependent override), so checking g1 is sufficient.
+    # In "simple" mode the theta_joint layout is simply [theta_1|theta_2|rho]
+    # (one fewer block than the carryover-mode layout below) — every
+    # downstream reader (optimizer.py, and the extraction code further
+    # down) infers which layout it got from len(theta_joint) - (n1+n2)
+    # rather than assuming a fixed width, so nothing else needs to branch
+    # on this flag.
+    use_cross_intercept_coupling = g1.get("INTERCEPT_DYNAMICS_TYPE", "carryover") != "simple"
     phi1_0, phi2_0 = 0.0, 0.0
     phi_bounds = (0.0, None)
-    theta0_joint = np.concatenate([theta0_1, theta0_2, [rho0, phi1_0, phi2_0]])
-    bounds_joint = list(bounds1) + list(bounds2) + [rho_bounds, phi_bounds, phi_bounds]
+    if use_cross_intercept_coupling:
+        theta0_joint = np.concatenate([theta0_1, theta0_2, [rho0, phi1_0, phi2_0]])
+        bounds_joint = list(bounds1) + list(bounds2) + [rho_bounds, phi_bounds, phi_bounds]
+    else:
+        theta0_joint = np.concatenate([theta0_1, theta0_2, [rho0]])
+        bounds_joint = list(bounds1) + list(bounds2) + [rho_bounds]
     # Safety net (mirrors modules/bounds.py): guarantees theta0_joint[i] always
     # lies inside bounds_joint[i], since the rho/phi appends above happen after
     # theta0_1/theta0_2 were already clipped individually and aren't covered by
@@ -476,8 +503,11 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
             theta1 = theta_joint[:n1]
             theta2 = theta_joint[n1:n1+n2]
             rho    = theta_joint[n1+n2]
-            phi1   = theta_joint[n1+n2+1]
-            phi2   = theta_joint[n1+n2+2]
+            if len(theta_joint) - (n1 + n2) >= 3:
+                phi1 = theta_joint[n1+n2+1]
+                phi2 = theta_joint[n1+n2+2]
+            else:
+                phi1 = phi2 = 0.0
             p1 = unpack_theta(theta1, g1)
             p2 = unpack_theta(theta2, g2)
             (_, _, _, _, _, _, _, _, _, loglik, _, _) = \
@@ -492,8 +522,12 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     best_theta1 = best_theta_joint[:n1]
     best_theta2 = best_theta_joint[n1:n1+n2]
     best_rho    = float(np.clip(best_theta_joint[n1+n2], -0.995, 0.995))
-    best_phi1   = float(best_theta_joint[n1+n2+1])
-    best_phi2   = float(best_theta_joint[n1+n2+2])
+    if len(best_theta_joint) - (n1 + n2) >= 3:
+        best_phi1 = float(best_theta_joint[n1+n2+1])
+        best_phi2 = float(best_theta_joint[n1+n2+2])
+    else:
+        best_phi1 = 0.0
+        best_phi2 = 0.0
     params1 = unpack_theta(best_theta1, g1)
     params2 = unpack_theta(best_theta2, g2)
 

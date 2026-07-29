@@ -101,13 +101,23 @@ def _composite_loss_joint(theta_joint, df_train, g1, g2, n1, n2,
     sequential optimizer calls.
 
     theta_joint = [theta_1 (len n1) | theta_2 (len n2) | rho | phi_1 | phi_2]
+
+    The trailing phi_1/phi_2 pair is OMITTED entirely (theta_joint ends
+    right after rho) when the model is configured with "simple" (no
+    carryover) intercept dynamics — cross-intercept coupling is itself a
+    carryover mechanism, so it doesn't apply there. Detected here from
+    theta_joint's actual length rather than a separate flag, so this stays
+    correct regardless of which caller (scipy or Nevergrad) built it.
     """
     try:
         theta1 = theta_joint[:n1]
         theta2 = theta_joint[n1:n1+n2]
         rho    = theta_joint[n1+n2]
-        phi1   = theta_joint[n1+n2+1]
-        phi2   = theta_joint[n1+n2+2]
+        if len(theta_joint) - (n1 + n2) >= 3:
+            phi1 = theta_joint[n1+n2+1]
+            phi2 = theta_joint[n1+n2+2]
+        else:
+            phi1 = phi2 = 0.0
         p1 = unpack_theta(theta1, g1)
         p2 = unpack_theta(theta2, g2)
         (_, _, _, _, _, _, _, _, _, loglik, _, _) = \

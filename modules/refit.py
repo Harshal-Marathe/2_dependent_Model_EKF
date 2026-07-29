@@ -177,8 +177,13 @@ def _block_slices(g: dict):
                         "cols": cols, "pairs": pairs, "scalar": scalar})
         idx += length
 
+    INTERCEPT_DYNAMICS_TYPE = g.get("INTERCEPT_DYNAMICS_TYPE", "carryover")
+
     add("Ls", N_MEDIA, cols=g["MEDIA_COLS"])
-    add("G0", 1, scalar=True)
+    if INTERCEPT_DYNAMICS_TYPE == "simple":
+        add("I0", 1, scalar=True)
+    else:
+        add("G0", 1, scalar=True)
     add("delta", N_MEDIA, cols=g["MEDIA_COLS"])
     add("gamma", N_EFFECTORS, cols=g["INTERCEPT_EFFECTORS"])
     add("n_params", N_MEDIA, cols=g["MEDIA_COLS"])
@@ -247,6 +252,16 @@ def build_warm_started_theta(g_new, theta0_default, bounds_default,
             if name == "G0" and "G0" in prev_params:
                 lo, hi = _bound_clip(bounds[start])
                 val = float(np.clip(prev_params["G0"], lo, hi))
+                theta0[start] = val
+                if freeze_existing and not refit_G0:
+                    bounds[start] = (val, val)
+            elif name == "I0" and "I0" in prev_params:
+                # Simple (no-carryover) intercept dynamics' baseline
+                # constant — same warm-start/freeze treatment as G0 above,
+                # gated by the same refit_G0 checkbox (it's the analogous
+                # "global intercept" knob for this dynamics mode).
+                lo, hi = _bound_clip(bounds[start])
+                val = float(np.clip(prev_params["I0"], lo, hi))
                 theta0[start] = val
                 if freeze_existing and not refit_G0:
                     bounds[start] = (val, val)

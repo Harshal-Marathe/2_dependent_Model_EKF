@@ -29,9 +29,23 @@ def _build_theta0_and_bounds(df, g):
     ls_bounds = [_b(c, "ls", 0.2, 0.8) for c in MEDIA_COLS]
     ls_init   = [np.clip(0.5, lo, hi) for lo, hi in ls_bounds]
 
-    # G0 bound
+    # ── Intercept dynamics: "carryover" (G0) vs "simple" (I0) ──────────
+    # Independent of INTERCEPT_TRANSFORM_TYPE (Power/Hill on the effector
+    # boost) — this switches whether the intercept state persists at all.
+    # See modules/params.py::_make_globals and modules/kalman.py module
+    # docstring. Exactly one of G0/I0 gets a theta slot (mirrors the
+    # USE_ORGANIC_DRIFT/mu variable-length pattern used elsewhere here).
+    INTERCEPT_DYNAMICS_TYPE = g.get("INTERCEPT_DYNAMICS_TYPE", "carryover")
+
+    # G0 bound (carryover mode)
     G0_bound = (0.7, 0.99)
     G0_init  = (G0_bound[0] + G0_bound[1]) / 2  # 0.845 — always valid even if bound changes later
+
+    # I0 bound (simple-regression mode) — a baseline level, same order of
+    # magnitude as the target itself; non-negative, like the intercept
+    # floor already applied elsewhere to the carryover intercept state.
+    I0_bound = (0.0, None)
+    I0_init  = float(df[g["TARGET_COL"]].mean()) * 0.5 if len(df) else 0.0
 
     # delta bounds: positive or negative constraint per media col
     def _delta_bound(col):
@@ -133,7 +147,7 @@ def _build_theta0_and_bounds(df, g):
     # ── theta0 assembly ───────────────────────────────────────────────
     theta0 = np.concatenate([
         ls_init,
-        [G0_init],
+        [G0_init] if INTERCEPT_DYNAMICS_TYPE != "simple" else [I0_init],
         delta_init,
         gamma_init,
         n_init,
@@ -160,7 +174,7 @@ def _build_theta0_and_bounds(df, g):
 
     bounds = (
         ls_bounds +
-        [G0_bound] +
+        ([G0_bound] if INTERCEPT_DYNAMICS_TYPE != "simple" else [I0_bound]) +
         delta_bounds +
         gamma_bounds +
         n_bounds +

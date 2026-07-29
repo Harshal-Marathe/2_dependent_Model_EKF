@@ -36,20 +36,38 @@ Weibull + Hill:
   of this lag sum — it only enters via the δ_i·f(x_i,t) shock term above:
     w_l = (k/λ) · (l/λ)^(k−1) · exp( −(l/λ)^k )
 
-Intercept (all modes) — Power or Hill, chosen independently of the media
-Transform Type above via config "intercept_transform_type":
+Intercept — two independent switches: a Transform Type (Power or Hill,
+config "intercept_transform_type") for the effector boost shape, and a
+Dynamics Type (Carryover or Simple, config "intercept_dynamics_type")
+for whether the intercept persists period-to-period at all:
 
-  Power (default):
+  Carryover (default) + Power:
     I_t = G0 · I_{t-1}  +  Σ_k γ_k · media_k,t^{n_k_intercept}
 
-  Hill:
+  Carryover (default) + Hill:
     I_t = G0 · I_{t-1}  +  Σ_k γ_k ·
+              media_k,t^{n_k_intercept} /
+              ( media_k,t^{n_k_intercept} + S_k_intercept^{n_k_intercept} )
+
+  Simple (no carryover — pure regression on current-period effectors) + Power:
+    I_t = I0  +  Σ_k γ_k · media_k,t^{n_k_intercept}
+
+  Simple (no carryover — pure regression on current-period effectors) + Hill:
+    I_t = I0  +  Σ_k γ_k ·
               media_k,t^{n_k_intercept} /
               ( media_k,t^{n_k_intercept} + S_k_intercept^{n_k_intercept} )
 
   Every intercept-effector column — whether or not it is also a media
   channel with its own beta — is transformed the same way, with its own
   independently-fitted n_k_intercept (and S_k_intercept, Hill only).
+
+  In Simple mode, G0 is fixed at 0 (dropped out of theta entirely) and a
+  fitted constant baseline I0 takes its place — implemented as: Tmat[0,0]
+  stays 0 (so the Tmat @ x_prev matrix multiply contributes nothing to the
+  intercept row) and I0 is added alongside the effector boost in the
+  additive (nonlinear) part of the predict step, exactly where G0·I_{t-1}
+  would otherwise have been folded in via the matrix multiply. See
+  modules/params.py::unpack_theta and _predict_step below.
 
 ──────────────────────────────────────────────────────────────────────────
 Joint (bivariate) Kalman-filter fit
@@ -115,6 +133,13 @@ exist/are fitted when a second dependent variable is configured). This
 is implemented as two off-diagonal entries in the joint transition
 matrix — Tmat_joint[0, dim1] = phi_1 and Tmat_joint[dim1, 0] = phi_2 —
 and the matching additive terms in the mean prediction step.
+
+Cross-intercept coupling only applies when BOTH equations are on
+"carryover" intercept dynamics — it is itself a carryover mechanism (each
+equation's intercept picking up the OTHER equation's PREVIOUS value), so
+it is dropped (phi_1 = phi_2 = 0, and their theta slots omitted entirely)
+whenever config "intercept_dynamics_type" is "simple". See
+modules/pipeline.py::run_multi_dependent_pipeline.
 """
 
 import numpy as np
@@ -593,7 +618,11 @@ def _predict_step(t, x_prev, df, pc):
         x_p[si]  = min(x_p[si], -1e-8)
 
     # ── Intercept boost ───────────────────────────────────────
-    x_p[0] += pc["intercept_boost"][t]
+    # I0 is 0.0 in "carryover" mode (dynamics fully covered by Tmat[0,0] =
+    # G0 already applied via the Tmat @ x_prev multiply above) and the
+    # fitted baseline constant in "simple" mode (where Tmat[0,0] = 0, so
+    # this add is literally the whole of I_t besides the effector boost).
+    x_p[0] += pc["intercept_boost"][t] + params.get("I0", 0.0)
     if pc["USE_ORGANIC_DRIFT"]:
         x_p[0] += params["mu"]
 
