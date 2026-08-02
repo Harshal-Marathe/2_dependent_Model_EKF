@@ -210,7 +210,93 @@ def _render_spend_settings(kp, g, df_full):
     return rescale_factor, excluded_media, promo_cols
 
 
-def _add_efficiency_index(df_st, g, df_full, rescale_factor, excluded_media, promo_cols):
+def _roi_value_adj_factor(channel, price_factor, roi_adj):
+    """Combine the Tab-2 price-conversion factor with this channel's own
+    multiply/divide numbers (from the ROI Value Conversion panel) into a
+    single multiplier applied to Beta x Input before it's divided by
+    spend for ROI. Missing/zero divide falls back to 1 (no-op)."""
+    a = (roi_adj or {}).get(channel, {})
+    mult = a.get("multiply", 1.0)
+    div  = a.get("divide", 1.0)
+    mult = mult if mult not in (None, 0) else 1.0
+    div  = div if div not in (None, 0) else 1.0
+    return float(price_factor) * float(mult) / float(div)
+
+
+def _render_roi_value_conversion_panel(kp, g):
+    """
+    Side panel (used by BOTH the Short-Term table's ROI column and the
+    Section G ROI Analytics table): lets the user convert each media
+    channel's Beta x Input into VALUE before it's divided by spend.
+
+        ROI_channel = (BetaInput_total * PriceConversionFactor
+                        * multiply_channel / divide_channel) / Spend_channel
+
+    PriceConversionFactor comes from Tab 2 · Prophet Decomposition's
+    "Sales Modeling Basis" section:
+      - Sales Value modeled  -> factor = 1 (contributions are already value,
+        ROI is Beta x Input / spend directly, unchanged from before)
+      - Sales Volume modeled -> factor = Average Price (x1000 if the
+        volume was flagged as Tonnes there, since price is assumed per Kg)
+
+    The multiply/divide numbers below are optional extras on top of that
+    (e.g. a channel-specific unit conversion) — they default to 1 (no-op).
+    """
+    basis = st.session_state.get("sales_modeling_basis", "value")
+    price_factor = float(st.session_state.get("price_conversion_factor", 1.0) or 1.0)
+
+    with st.expander("🎛️ ROI Value Conversion (Beta × Input → Value, used for ROI)",
+                      expanded=False):
+        if basis == "volume":
+            unit_note = (" (× 1000 since Tab 2's volume unit = Tonnes, price assumed per Kg)"
+                         if st.session_state.get("sales_volume_unit") == "Tonnes" else "")
+            st.caption(
+                f"📦 **Tab 2** says you're modeling **Sales Volume**. Average price of "
+                f"**{st.session_state.get('sales_price_col') or '—'}** = "
+                f"**{st.session_state.get('sales_avg_price', 0):,.4f}**{unit_note} "
+                f"→ price conversion factor = **{price_factor:,.4f}**. This is applied "
+                f"to every media channel's Beta × Input below before it's divided by "
+                f"spend for ROI."
+            )
+        else:
+            st.caption(
+                "💵 **Tab 2** says you're modeling **Sales Value** (or hasn't been set) "
+                "— no price conversion is applied (factor = 1). Change this in "
+                "**Tab 2 · Sales Modeling Basis** if that's wrong."
+            )
+        st.caption(
+            "Optionally also multiply and/or divide each media channel's "
+            "Beta × Input by an extra number before it's used for ROI "
+            "(e.g. a channel-specific unit conversion). Leave both at 1.0 "
+            "for no extra adjustment."
+        )
+        media_cols = g.get("MEDIA_COLS", [])
+        roi_adj = {}
+        if media_cols:
+            hc1, hc2, hc3 = st.columns([2, 1, 1])
+            hc1.caption("Channel"); hc2.caption("× multiply"); hc3.caption("÷ divide")
+            for col in media_cols:
+                rc1, rc2, rc3 = st.columns([2, 1, 1])
+                with rc1:
+                    st.markdown(f"**{col}**")
+                with rc2:
+                    mult = st.number_input(
+                        "multiply", min_value=0.0, value=1.0, step=0.1,
+                        format="%.6g", key=f"{kp}roi_mult_{col}",
+                        label_visibility="collapsed")
+                with rc3:
+                    div = st.number_input(
+                        "divide", min_value=0.0, value=1.0, step=0.1,
+                        format="%.6g", key=f"{kp}roi_div_{col}",
+                        label_visibility="collapsed")
+                roi_adj[col] = {"multiply": mult, "divide": div}
+        else:
+            st.caption("No media channels configured.")
+    return price_factor, roi_adj
+
+
+def _add_efficiency_index(df_st, g, df_full, rescale_factor, excluded_media, promo_cols,
+                           price_factor=1.0, roi_adj=None):
     """
     Adds EI (Efficiency Index) and ROI columns to the Short-Term
     Contribution Summary table — computed ONLY for "own" spend-bearing
@@ -224,7 +310,12 @@ def _add_efficiency_index(df_st, g, df_full, rescale_factor, excluded_media, pro
               where Spend Share (%) is that variable's share of the
               OWN-spend pool only (own media (minus exclusions) + flagged
               promo spend) — never competitor spend.
-        ROI = Total Contrib / Rescaled Spend
+        ROI = (Total Contrib * ValueAdjFactor) / Rescaled Spend
+              where ValueAdjFactor = PriceConversionFactor (from Tab 2,
+              1.0 if modeling Sales Value) * that channel's multiply /
+              divide from the ROI Value Conversion panel (1.0 by default,
+              media channels only — non-media promo columns get the price
+              factor but no multiply/divide adjustment).
     """
     media_cols = [c for c in g.get("MEDIA_COLS", []) if c not in (excluded_media or [])]
     media_spend_map = g.get("MEDIA_SPEND_MAP", {})
@@ -250,7 +341,9 @@ def _add_efficiency_index(df_st, g, df_full, rescale_factor, excluded_media, pro
             sp = rescaled_spend[ch]
             spend_share = sp / total_own_spend * 100
             ei = row["Share (%)"] / spend_share if spend_share > 1e-9 else np.nan
-            roi = row["Total Contrib"] / sp if sp > 1e-9 else np.nan
+            value_adj = _roi_value_adj_factor(ch, price_factor, roi_adj) if ch in media_cols \
+                else float(price_factor)
+            roi = (row["Total Contrib"] * value_adj) / sp if sp > 1e-9 else np.nan
             spend_share_vals.append(round(spend_share, 2))
             ei_vals.append(round(ei, 3) if pd.notna(ei) else np.nan)
             roi_vals.append(round(roi, 4) if pd.notna(roi) else np.nan)
@@ -419,13 +512,15 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
     totals_lt  = contrib_df[long_cols].sum()
 
     rescale_factor, excluded_media, promo_cols = _render_spend_settings(kp, g, df)
+    price_factor, roi_adj = _render_roi_value_conversion_panel(kp, g)
 
     t1, t2 = st.columns(2)
     with t1:
         st.markdown("#### Short-Term Contribution Summary")
         df_st, pos_st, neg_st = _contribution_table(totals_st, "ShortTerm_")
         df_st_ei, rescaled_spend, total_own_spend = _add_efficiency_index(
-            df_st, g, df, rescale_factor, excluded_media, promo_cols)
+            df_st, g, df, rescale_factor, excluded_media, promo_cols,
+            price_factor=price_factor, roi_adj=roi_adj)
         st.dataframe(
             df_st_ei.style.format({
                 "Total Contrib":   "{:,.2f}",
@@ -443,7 +538,10 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
             "spend weight, EI < 1 means below. Competitor/price/intercept rows "
             "show **—** since they have no spend to divide by. "
             f"Own-spend pool used: **{total_own_spend:,.2f}** "
-            f"(rescale ×{rescale_factor:,.0f})."
+            f"(rescale ×{rescale_factor:,.0f}). "
+            f"**ROI** = (Total Contrib × Value Conversion Factor) ÷ Spend — see "
+            "**🎛️ ROI Value Conversion** panel above "
+            f"(current price factor from Tab 2: ×{price_factor:,.4f})."
         )
         check_st = pos_st + neg_st
         c1s, c2s, c3s = st.columns(3)
@@ -616,15 +714,27 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
     if not roi_df.empty:
         roi_df = roi_df.copy()
         roi_df["TotalSpend"] = roi_df["TotalSpend"] * rescale_factor
+        roi_df["ValueAdjFactor"] = roi_df["Channel"].apply(
+            lambda ch: _roi_value_adj_factor(ch, price_factor, roi_adj))
+        roi_df["AdjTotalContrib"] = roi_df["TotalContrib"] * roi_df["ValueAdjFactor"]
         roi_df["ROI"] = np.where(
             roi_df["TotalSpend"] > 1e-9,
-            roi_df["TotalContrib"] / roi_df["TotalSpend"], 0.0,
+            roi_df["AdjTotalContrib"] / roi_df["TotalSpend"], 0.0,
         )
         if rescale_factor != 1:
             st.caption(
                 f"💱 Spend rescale of **×{rescale_factor:,.0f}** from the "
                 f"**Spend Basis Settings** panel above has been applied to "
                 f"TotalSpend and ROI below."
+            )
+        if (price_factor != 1.0
+                or any(a.get("multiply", 1.0) != 1.0 or a.get("divide", 1.0) != 1.0
+                       for a in (roi_adj or {}).values())):
+            st.caption(
+                "🧮 **ROI Value Conversion** applied — TotalContrib × "
+                "**ValueAdjFactor** (price factor from Tab 2 × any per-channel "
+                "multiply/divide from the panel above) = **AdjTotalContrib**, "
+                "which is what ROI below is computed from."
             )
         n_grp = int((roi_df.get("InputType", pd.Series(dtype=str)) == "GRP/Impressions").sum())
         if n_grp:
@@ -646,9 +756,11 @@ def render_full_results(df, config, res, target, key_prefix="", pcb_key="per_cha
             st.plotly_chart(fig_roi, use_container_width=True, key=f"{kp}fig_roi")
         with c2:
             st.dataframe(roi_df.style.format({
-                "TotalSpend":   "{:,.2f}",
-                "TotalContrib": "{:,.2f}",
-                "ROI":          "{:.4f}",
+                "TotalSpend":      "{:,.2f}",
+                "TotalContrib":    "{:,.2f}",
+                "ValueAdjFactor":  "{:,.4f}",
+                "AdjTotalContrib": "{:,.2f}",
+                "ROI":             "{:.4f}",
             }), use_container_width=True, hide_index=True, key=f"{kp}df_roi")
         best  = roi_df.loc[roi_df["ROI"].idxmax()]
         worst = roi_df.loc[roi_df["ROI"].idxmin()]

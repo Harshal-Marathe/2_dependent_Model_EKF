@@ -19,6 +19,74 @@ def render_tab2(prophet_available: bool, holidays_available: bool):
 
     df = st.session_state.df.copy()
     num_cols = df.select_dtypes(include=np.number).columns.tolist()
+
+    # ── 0 · Sales Modeling Basis (Volume vs Value) ──────────────────────
+    # This does not affect Prophet itself — it just captures a setting
+    # that Tab 7 (Results) and Tab 8 (Refine & Refit) need later to
+    # calculate ROI correctly. Beta x Input contributions come out of the
+    # model in whatever unit the dependent variable itself is in. If that
+    # is Sales VALUE (currency), dividing by spend gives a correct ROI
+    # directly. If it's Sales VOLUME (units/kg/tonnes), the contribution
+    # must first be converted to value (x average price) before it's
+    # divided by spend — otherwise ROI is in volume/currency, not
+    # currency/currency.
+    st.markdown("#### 📦 0 · Sales Modeling Basis (for ROI value conversion)")
+    info(
+        "Tell the app whether the dependent variable you are modeling is "
+        "<b>Sales Value</b> (currency) or <b>Sales Volume</b> (units/kg/tonnes). "
+        "This is only used later, by <b>Tab 7 · Results &amp; ROI Analytics</b> and "
+        "<b>Tab 8 · Refine &amp; Refit</b>, to correctly convert Beta × Input "
+        "contributions into value before they're divided by spend for ROI."
+    )
+    mb1, mb2, mb3 = st.columns(3)
+    with mb1:
+        modeling_basis_label = st.radio(
+            "I am modeling:", ["Sales Value", "Sales Volume"],
+            key="sales_modeling_basis_choice", horizontal=True,
+        )
+
+    price_col = None
+    avg_price = 1.0
+    volume_unit = None
+    price_conversion_factor = 1.0
+
+    if modeling_basis_label == "Sales Volume":
+        with mb2:
+            price_col = st.selectbox(
+                "💰 Price column", num_cols, key="sales_price_col_select")
+        with mb3:
+            volume_unit = st.selectbox(
+                "📏 Volume is currently in", ["Kg", "Tonnes"],
+                key="sales_volume_unit_select",
+                help="If Tonnes, the volume will be converted to Kg "
+                     "(× 1000) before multiplying by price, since price "
+                     "is assumed to be quoted per Kg.")
+        if price_col:
+            avg_price = float(pd.to_numeric(df[price_col], errors="coerce").mean())
+            unit_mult = 1000.0 if volume_unit == "Tonnes" else 1.0
+            price_conversion_factor = avg_price * unit_mult
+            st.success(
+                f"✅ Average price of **{price_col}** = **{avg_price:,.4f}**"
+                + (f" · Volume unit = **Tonnes** → × 1000 to convert to Kg "
+                   f"(price assumed per Kg)" if volume_unit == "Tonnes" else "")
+                + f" → **price conversion factor stored = {price_conversion_factor:,.4f}**. "
+                "This will be used automatically in the ROI panel of Tab 7 / Tab 8."
+            )
+    else:
+        st.caption(
+            "Sales Value modeling selected — ROI in Tab 7/Tab 8 will use "
+            "Beta × Input directly (no price conversion applied)."
+        )
+
+    st.session_state.sales_modeling_basis = (
+        "volume" if modeling_basis_label == "Sales Volume" else "value")
+    st.session_state.sales_price_col = price_col
+    st.session_state.sales_avg_price = avg_price
+    st.session_state.sales_volume_unit = volume_unit
+    st.session_state.price_conversion_factor = price_conversion_factor
+
+    st.divider()
+
     info("Prophet extracts <b>trend</b>, <b>seasonality</b>, and <b>holiday effects</b>. "
          "After fitting, click <b>Add prophet components to dataset</b> — those columns "
          "will then appear in <b>Tab 4</b> and <b>Tab 5</b> immediately.")

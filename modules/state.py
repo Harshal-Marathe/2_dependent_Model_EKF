@@ -18,6 +18,13 @@ _defaults = {
     "refit_history": [],       # log of refit steps: [{Step, Action, Variable, MAPE, R2}, ...]
     "refit_last_message": None,  # stashed success toast, shown once after the forced rerun in Tab 8
     "_last_uploaded_file_id": None,  # (name, size) of last processed upload — see tab1
+
+    # ── Sales Modeling Basis (set in Tab 2) — used by ROI calc in Tab 7/8 ──
+    "sales_modeling_basis": "value",   # "value" or "volume"
+    "sales_price_col": None,           # price column used to compute avg price (volume mode only)
+    "sales_avg_price": 1.0,            # mean of the price column
+    "sales_volume_unit": None,         # "Kg" or "Tonnes" (volume mode only)
+    "price_conversion_factor": 1.0,    # avg_price * (1000 if Tonnes else 1); 1.0 in value mode
 }
 
 
