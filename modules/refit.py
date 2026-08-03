@@ -27,7 +27,7 @@ from scipy.optimize import minimize
 
 from modules.dependencies import NEVERGRAD_AVAILABLE
 from modules.params import _make_globals, unpack_theta
-from modules.bounds import _build_theta0_and_bounds
+from modules.bounds import _build_theta0_and_bounds, build_normalized_problem
 from modules.optimizer import run_nevergrad_optimizer
 from modules.kalman import run_kalman_filter, rts_smoother, _precompute_adstocked, build_static_cache
 from modules.pipeline import _postprocess_equation
@@ -431,14 +431,23 @@ def run_refit_pipeline(df_full, new_config, prev_result, max_iter, method,
                                                   static_cache=static_cache_train)
         opt_success, opt_nit = True, ng_cfg.get("budget", 500)
     else:
-        def objective(theta):
+        # Same fix as run_full_ekf_pipeline (see
+        # modules/bounds.py::build_normalized_problem) — refit's theta has
+        # the same wide-scale mix, so it's just as prone to `n` (and other
+        # small-range params) getting stuck at their warm-started/init
+        # value under a single unscaled finite-difference `eps`.
+        theta0_norm, norm_bounds, unscale = build_normalized_problem(theta0, bounds)
+
+        def objective(theta_norm):
+            theta = unscale(theta_norm)
             p = unpack_theta(theta, g_new)
             _, _, _, _, _, _, _, _, loglik = run_kalman_filter(
                 df_train, p, g_new, static_cache=static_cache_train)
             return -loglik
-        opt = minimize(objective, theta0, method=method,
-                        bounds=bounds, options={"maxiter": max_iter, "ftol": 1e-9})
-        best_theta, opt_success, opt_nit = opt.x, opt.success, opt.nit
+        opt = minimize(objective, theta0_norm, method=method,
+                        bounds=norm_bounds,
+                        options={"maxiter": max_iter, "ftol": 1e-9, "eps": 1e-6})
+        best_theta, opt_success, opt_nit = unscale(opt.x), opt.success, opt.nit
 
     params = unpack_theta(best_theta, g_new)
     static_cache_full = build_static_cache(df_full, g_new)

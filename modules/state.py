@@ -25,6 +25,11 @@ _defaults = {
     "sales_avg_price": 1.0,            # mean of the price column
     "sales_volume_unit": None,         # "Kg" or "Tonnes" (volume mode only)
     "price_conversion_factor": 1.0,    # avg_price * (1000 if Tonnes else 1); 1.0 in value mode
+
+    # ── Save / Load Model workspace (sidebar) ────────────────────────
+    "_workspace_bytes": None,
+    "_workspace_fname": None,
+    "_last_loaded_workspace_id": None,
 }
 
 

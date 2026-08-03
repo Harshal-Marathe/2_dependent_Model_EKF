@@ -218,3 +218,73 @@ def _build_theta0_and_bounds(df, g):
     ])
 
     return theta0, bounds
+
+
+def build_normalized_problem(theta0, bounds, floor=1e-3, unbounded_mult=20.0):
+    """
+    Rescales theta into a per-parameter-normalized space before handing it
+    to a gradient-based optimizer (L-BFGS-B / SLSQP), and returns an
+    `unscale` function to map results back.
+
+    WHY THIS EXISTS
+    ----------------
+    `theta` mixes parameters on wildly different natural scales in one flat
+    vector — e.g. Hill's n ~ O(1-15), Ls/delta ~ O(0-1), S (half-saturation)
+    ~ O(1e-6 to 1e8), sigma_y ~ O(target scale). scipy's L-BFGS-B/SLSQP
+    approximate the gradient with forward differences using a single scalar
+    step (`eps`, default ~1.49e-8) applied identically to every dimension.
+    For small-range parameters like `n`, that absolute step is often
+    smaller than the numerical noise floor of the Kalman filter/smoother
+    recursion itself — the optimizer reads the resulting near-zero /
+    noise-dominated finite-difference "gradient" as "no signal, stop
+    moving this dimension", and the parameter just sits at its init value
+    (theta0) forever, even though a real, non-flat optimum exists a bit
+    further away. This was the direct cause of Hill's `n` consistently
+    landing exactly on its init value (2.0) for every channel.
+
+    HOW IT WORKS
+    ------------
+    - Fully-bounded dims [lo, hi] -> normalized to exactly [0, 1], so a
+      single normalized `eps` corresponds to a step of `eps * (hi - lo)`
+      in real units — proportional to that parameter's own natural range,
+      instead of an arbitrary absolute number.
+    - Partially/fully unbounded dims (e.g. unsigned betas, sigma_y's open
+      upper end) don't have a real range to normalize by. Rather than
+      inventing one arbitrary huge constant for all of them (that's
+      exactly what made Nevergrad's own ±1e6 sentinel bounds misbehave —
+      it let a couple of huge-range dimensions dominate the search), each
+      one gets a window sized proportionally to its OWN starting value
+      (`unbounded_mult * |theta0_i|`, floored so a zero-valued init still
+      gets a usable window). Any real one-sided bound that *does* exist
+      (e.g. gamma >= 0, sigma_y >= 1e-3) is preserved exactly — only the
+      unconstrained side gets the proportional window, purely to condition
+      the finite-difference step size, never to actually cap the search
+      (its normalized bound stays None on that side, so scipy can still
+      walk arbitrarily far from theta0 if the data wants it to).
+    """
+    n = len(theta0)
+    lo_ref = np.empty(n)
+    width = np.empty(n)
+    norm_bounds = []
+    for i, (lo, hi) in enumerate(bounds):
+        x0 = float(theta0[i])
+        if lo is not None and hi is not None:
+            lo_ref[i] = lo
+            width[i] = max(hi - lo, floor)
+            norm_bounds.append((0.0, 1.0))
+        else:
+            w = unbounded_mult * max(abs(x0), floor)
+            ref_lo = lo if lo is not None else x0 - w
+            ref_hi = hi if hi is not None else x0 + w
+            lo_ref[i] = ref_lo
+            width[i] = max(ref_hi - ref_lo, floor)
+            nb_lo = 0.0 if lo is not None else None
+            nb_hi = (hi - ref_lo) / width[i] if hi is not None else None
+            norm_bounds.append((nb_lo, nb_hi))
+
+    theta0_norm = np.clip((theta0 - lo_ref) / width, 0.0, 1.0)
+
+    def unscale(theta_norm):
+        return lo_ref + np.asarray(theta_norm) * width
+
+    return theta0_norm, norm_bounds, unscale

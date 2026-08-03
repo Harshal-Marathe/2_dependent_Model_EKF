@@ -19,7 +19,7 @@ from scipy.optimize import minimize
 
 from modules.dependencies import NEVERGRAD_AVAILABLE
 from modules.params import _make_globals, unpack_theta
-from modules.bounds import _build_theta0_and_bounds
+from modules.bounds import _build_theta0_and_bounds, build_normalized_problem
 from modules.optimizer import run_nevergrad_optimizer, run_nevergrad_optimizer_joint
 from modules.kalman import (
     run_kalman_filter, run_bivariate_kalman_filter, rts_smoother,
@@ -339,14 +339,25 @@ def run_full_ekf_pipeline(df_full, config, max_iter, method, ng_cfg=None):
                                                   static_cache=static_cache_train)
         opt_success = True; opt_nit = ng_cfg.get("budget", 500)
     else:
-        def objective(theta):
+        # See modules/bounds.py::build_normalized_problem for why this
+        # normalization matters: without it, L-BFGS-B/SLSQP's single
+        # scalar finite-difference `eps` applied across theta's wildly
+        # different natural scales (Hill's n ~ O(1-15) next to S ~ O(1e8))
+        # leaves small-range parameters like `n` stuck exactly at their
+        # init value — their true gradient signal is below the numerical
+        # noise floor of the Kalman recursion at the default step size.
+        theta0_norm, norm_bounds, unscale = build_normalized_problem(theta0, bounds)
+
+        def objective(theta_norm):
+            theta = unscale(theta_norm)
             p = unpack_theta(theta, g)
             _, _, _, _, _, _, _, _, loglik = run_kalman_filter(
                 df_train, p, g, static_cache=static_cache_train)
             return -loglik
-        opt = minimize(objective, theta0, method=method,
-                       bounds=bounds, options={"maxiter": max_iter, "ftol": 1e-9})
-        best_theta = opt.x; opt_success = opt.success; opt_nit = opt.nit
+        opt = minimize(objective, theta0_norm, method=method,
+                       bounds=norm_bounds,
+                       options={"maxiter": max_iter, "ftol": 1e-9, "eps": 1e-6})
+        best_theta = unscale(opt.x); opt_success = opt.success; opt_nit = opt.nit
 
     params = unpack_theta(best_theta, g)
     static_cache_full = build_static_cache(df_full, g)
@@ -499,7 +510,15 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
             static_cache1=static_cache1_train, static_cache2=static_cache2_train)
         opt_success = True; opt_nit = ng_cfg.get("budget", 500)
     else:
-        def objective(theta_joint):
+        # Same normalization fix as the single-dependent path above (see
+        # modules/bounds.py::build_normalized_problem) — theta_joint mixes
+        # the same wide-scale parameters (twice over, once per dependent
+        # variable) plus rho/phi, so it needs it just as much.
+        theta0_joint_norm, norm_bounds_joint, unscale_joint = build_normalized_problem(
+            theta0_joint, bounds_joint)
+
+        def objective(theta_joint_norm):
+            theta_joint = unscale_joint(theta_joint_norm)
             theta1 = theta_joint[:n1]
             theta2 = theta_joint[n1:n1+n2]
             rho    = theta_joint[n1+n2]
@@ -515,9 +534,10 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
                                              static_cache1=static_cache1_train,
                                              static_cache2=static_cache2_train)
             return -loglik
-        opt = minimize(objective, theta0_joint, method=method,
-                        bounds=bounds_joint, options={"maxiter": max_iter, "ftol": 1e-9})
-        best_theta_joint = opt.x; opt_success = opt.success; opt_nit = opt.nit
+        opt = minimize(objective, theta0_joint_norm, method=method,
+                        bounds=norm_bounds_joint,
+                        options={"maxiter": max_iter, "ftol": 1e-9, "eps": 1e-6})
+        best_theta_joint = unscale_joint(opt.x); opt_success = opt.success; opt_nit = opt.nit
 
     best_theta1 = best_theta_joint[:n1]
     best_theta2 = best_theta_joint[n1:n1+n2]
