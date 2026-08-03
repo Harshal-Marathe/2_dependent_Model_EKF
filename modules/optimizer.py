@@ -9,6 +9,7 @@ import streamlit as st
 from concurrent.futures import ThreadPoolExecutor
 
 from modules.params import unpack_theta
+from modules.bounds import build_normalized_problem
 from modules.kalman import run_kalman_filter, run_bivariate_kalman_filter, build_static_cache
 
 
@@ -69,23 +70,52 @@ def _ask_eval_tell_loop(optimizer, budget, num_workers, progress_label, loss_fn)
     return best_theta, best_loss
 
 
+def _ng_bounds_arrays(norm_bounds, sentinel=100.0):
+    """
+    ng.p.Array.set_bounds() needs finite numeric arrays, but
+    build_normalized_problem() legitimately leaves a side as None when the
+    ORIGINAL parameter bound was None on that side (see its docstring —
+    that's a real "no constraint here" that we don't want to silently
+    reintroduce, so we don't turn it into a tight box). Since every
+    dimension is already normalized to a comparable, roughly-O(1) scale by
+    that point (unlike the raw ±1e6-in-real-units sentinel this replaces),
+    a single generous, uniform normalized-space sentinel works fine here —
+    it's proportionate for every dimension instead of swamping the ones
+    that started out small in real units.
+    """
+    lows  = np.array([b[0] if b[0] is not None else -sentinel for b in norm_bounds])
+    highs = np.array([b[1] if b[1] is not None else  sentinel for b in norm_bounds])
+    return lows, highs
+
+
 def run_nevergrad_optimizer(df_train, g, theta0, bounds, ng_cfg, static_cache=None):
     import nevergrad as ng
     strategy_name = ng_cfg.get("strategy", "NGOpt"); budget = ng_cfg.get("budget", 500)
     num_workers = max(1, int(ng_cfg.get("num_workers", 1)))
     if static_cache is None:
         static_cache = build_static_cache(df_train, g)
-    lows  = np.array([b[0] if b[0] is not None else -1e6 for b in bounds])
-    highs = np.array([b[1] if b[1] is not None else  1e6 for b in bounds])
-    param = ng.p.Array(init=theta0).set_bounds(lows, highs)
+
+    # Same fix as the L-BFGS-B/SLSQP path (modules/bounds.py::build_
+    # normalized_problem): search in per-parameter-normalized space
+    # instead of raw theta. Previously every unbounded dimension (gamma,
+    # sigma_y, several deltas) got an arbitrary ±1e6 box, which — for a
+    # population/mutation-based search like NGOpt — let those huge-range
+    # dimensions dominate exploration and mutation step sizes, drowning
+    # out small-range ones like Hill's n (1-15) and letting a couple of
+    # parameters wander into nonsensical territory that corrupted the
+    # whole loglik surface for everything else. Normalizing first makes
+    # every dimension's search box proportionate, the same way it already
+    # fixed L-BFGS-B/SLSQP.
+    theta0_norm, norm_bounds, unscale = build_normalized_problem(theta0, bounds)
+    lows, highs = _ng_bounds_arrays(norm_bounds)
+    param = ng.p.Array(init=theta0_norm).set_bounds(lows, highs)
     optimizer_cls = getattr(ng.optimizers, strategy_name, None) or ng.optimizers.NGOpt
     optimizer = optimizer_cls(parametrization=param, budget=budget, num_workers=num_workers)
 
-    loss_fn = lambda theta: _composite_loss(theta, df_train, g, static_cache)
-    best_theta, best_loss = _ask_eval_tell_loop(
+    loss_fn = lambda theta_norm: _composite_loss(unscale(theta_norm), df_train, g, static_cache)
+    best_theta_norm, best_loss = _ask_eval_tell_loop(
         optimizer, budget, num_workers, f"Nevergrad [{strategy_name}]", loss_fn)
-    if best_theta is None:
-        best_theta = theta0.copy()
+    best_theta = unscale(best_theta_norm) if best_theta_norm is not None else theta0.copy()
     return best_theta, best_loss
 
 
@@ -140,16 +170,18 @@ def run_nevergrad_optimizer_joint(df_train, g1, g2, theta0_joint, bounds_joint, 
         static_cache1 = build_static_cache(df_train, g1)
     if static_cache2 is None:
         static_cache2 = build_static_cache(df_train, g2)
-    lows  = np.array([b[0] if b[0] is not None else -1e6 for b in bounds_joint])
-    highs = np.array([b[1] if b[1] is not None else  1e6 for b in bounds_joint])
-    param = ng.p.Array(init=theta0_joint).set_bounds(lows, highs)
+
+    # Same normalization fix as run_nevergrad_optimizer above.
+    theta0_joint_norm, norm_bounds_joint, unscale_joint = build_normalized_problem(
+        theta0_joint, bounds_joint)
+    lows, highs = _ng_bounds_arrays(norm_bounds_joint)
+    param = ng.p.Array(init=theta0_joint_norm).set_bounds(lows, highs)
     optimizer_cls = getattr(ng.optimizers, strategy_name, None) or ng.optimizers.NGOpt
     optimizer = optimizer_cls(parametrization=param, budget=budget, num_workers=num_workers)
 
-    loss_fn = lambda theta: _composite_loss_joint(
-        theta, df_train, g1, g2, n1, n2, static_cache1, static_cache2)
-    best_theta, best_loss = _ask_eval_tell_loop(
+    loss_fn = lambda theta_joint_norm: _composite_loss_joint(
+        unscale_joint(theta_joint_norm), df_train, g1, g2, n1, n2, static_cache1, static_cache2)
+    best_theta_norm, best_loss = _ask_eval_tell_loop(
         optimizer, budget, num_workers, f"Nevergrad [{strategy_name}] (joint bivariate)", loss_fn)
-    if best_theta is None:
-        best_theta = theta0_joint.copy()
+    best_theta = unscale_joint(best_theta_norm) if best_theta_norm is not None else theta0_joint.copy()
     return best_theta, best_loss
