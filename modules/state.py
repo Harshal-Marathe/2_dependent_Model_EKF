@@ -8,6 +8,7 @@ _defaults = {
     "df": None,
     "prophet_results": None,
     "prophet_cols_added": [],   # list of "prophet_*" column names merged into df
+    "chain_driver_cols_added": [],  # driver column(s) merged into df by chained Dep2->Dep1 mode
     "config": None,
     "model_results": None,
     "model_fitted": False,

@@ -117,6 +117,63 @@ def render_tab4():
             )
             enable_second_dependent = False
 
+    # ── A1b. Relationship between Dependent 1 and Dependent 2 ──────────
+    dependent_relationship = "joint"
+    chain_use_fitted = True
+    chain_driver_role = "non_media"
+    chain_driver_positive = True
+    if enable_second_dependent and target2:
+        st.markdown("#### 🔀 Relationship between Dependent 1 and Dependent 2")
+        relationship_choice = st.radio(
+            "How should the two dependents be linked?",
+            [
+                "🔗 Joint — fitted together in one bivariate Kalman filter (correlated errors, cross-intercept coupling)",
+                "➡️ Chained — Dependent 2 is fitted on its own first, then its fitted values become an X-driver inside Dependent 1's equation",
+            ],
+            key="cfg_dep_relationship_mode",
+        )
+        dependent_relationship = "chained" if relationship_choice.startswith("➡️") else "joint"
+
+        if dependent_relationship == "chained":
+            info(
+                f"➡️ <b>Chained mode</b> — <code>{target2}</code> is modeled on its own first "
+                f"(own predictors, own adstock/saturation, own equation — exactly like a "
+                f"single-dependent RBE fit). Its resulting fitted trajectory is then added as a "
+                f"brand-new predictor column and used as an <b>X-driver inside "
+                f"{target if target else 'Dependent 1'}'s equation</b>, with its own beta "
+                "(and, if placed in the Media role, its own adstock + saturation curve). "
+                "This is a mediation / funnel relationship "
+                "(e.g. Media → Consideration → Sales), not a side-by-side joint fit."
+            )
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                chain_use_fitted = st.radio(
+                    f"Which values of `{target2}` feed into Dependent 1?",
+                    ["Smoothed / fitted values from Dependent 2's own model (recommended)",
+                     "Raw actual values (no separate Dependent 2 fit is 'trusted' as ground truth)"],
+                    key="cfg_chain_use_fitted",
+                ).startswith("Smoothed")
+            with cc2:
+                chain_driver_role = st.radio(
+                    "How does this driver enter Dependent 1's equation?",
+                    ["Non-media (direct beta, no adstock/saturation — like an organic control)",
+                     "Media-type (gets its own adstock + Hill/Power saturation curve, like a channel)"],
+                    key="cfg_chain_driver_role",
+                )
+                chain_driver_role = "media" if chain_driver_role.startswith("Media") else "non_media"
+            chain_driver_positive = st.checkbox(
+                f"Require `{target2}`'s effect on `{target}` to be POSITIVE",
+                value=True, key="cfg_chain_driver_positive",
+                help="Enforces a non-negative beta — appropriate for funnel relationships "
+                     "like Consideration → Sales where more of Dep 2 shouldn't hurt Dep 1.",
+            )
+            st.caption(
+                f"📌 Dependent 1's equation will gain one new predictor: the "
+                f"{'fitted' if chain_use_fitted else 'raw actual'} values of `{target2}`, "
+                f"entering as a **{chain_driver_role.replace('_',' ')}** variable"
+                f"{' with a positive-beta constraint' if chain_driver_positive else ''}."
+            )
+
     st.divider()
 
     # ── A3. Predictor Variables — Dependent 2 (optional independent set) ──
@@ -698,6 +755,10 @@ def render_tab4():
                 "target": target,
                 "target2": target2 if (enable_second_dependent and target2) else None,
                 "enable_second_dependent": bool(enable_second_dependent and target2),
+                "dependent_relationship": dependent_relationship,
+                "chain_use_fitted": chain_use_fitted,
+                "chain_driver_role": chain_driver_role,
+                "chain_driver_positive": chain_driver_positive,
                 "media": media,
                 "non_media": non_media,
                 "price": price_vars if use_price else [],
@@ -769,11 +830,20 @@ def render_tab4():
                     f"<b>{', '.join(prophet_in_model)}</b>"
                 )
             if st.session_state.config["enable_second_dependent"]:
-                st.success(
-                    f"➕ Second dependent variable enabled: **{target2}** — will be "
-                    f"fitted **jointly** with **{target}** in Tab 6 using a bivariate "
-                    f"Kalman filter (shared predictors x_t, correlated errors)."
-                )
+                if dependent_relationship == "chained":
+                    st.success(
+                        f"➡️ Second dependent variable enabled: **{target2}** — will be "
+                        f"fitted **on its own first**, then its "
+                        f"{'fitted' if chain_use_fitted else 'raw actual'} values will be "
+                        f"injected as a new **{chain_driver_role.replace('_',' ')}** predictor "
+                        f"driving **{target}** in Tab 6 (chained / mediation mode)."
+                    )
+                else:
+                    st.success(
+                        f"➕ Second dependent variable enabled: **{target2}** — will be "
+                        f"fitted **jointly** with **{target}** in Tab 6 using a bivariate "
+                        f"Kalman filter (shared predictors x_t, correlated errors)."
+                    )
                 if different_predictors_2:
                     st.info(
                         f"🔀 Dependent 2 uses its **own predictor set**: "

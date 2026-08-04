@@ -116,11 +116,22 @@ def render_tab7():
         "save it as the official model."
     )
     if st.session_state.config.get("enable_second_dependent") and st.session_state.config.get("target2"):
-        st.warning(
-            "⚠️ A second dependent variable is configured, but Tab 8 currently "
-            "refines **Dependent 1 only** (the joint bivariate fit is not "
-            "warm-startable yet). Refits here won't touch Dependent 2."
-        )
+        if st.session_state.config.get("dependent_relationship") == "chained":
+            driver_col = st.session_state.model_results.get("chain_driver_col")
+            st.warning(
+                "⚠️ A chained second dependent variable is configured, but Tab 8 "
+                "currently refines **Dependent 1 only**. Refits here won't re-fit "
+                f"Dependent 2 (`{st.session_state.config.get('target2')}`) — "
+                + (f"its fitted driver `{driver_col}` stays frozen and is treated as "
+                   "an ordinary predictor of Dependent 1." if driver_col else
+                   "its values feed Dependent 1 as an ordinary predictor.")
+            )
+        else:
+            st.warning(
+                "⚠️ A second dependent variable is configured, but Tab 8 currently "
+                "refines **Dependent 1 only** (the joint bivariate fit is not "
+                "warm-startable yet). Refits here won't touch Dependent 2."
+            )
 
     _init_refit_state()
     df = st.session_state.df

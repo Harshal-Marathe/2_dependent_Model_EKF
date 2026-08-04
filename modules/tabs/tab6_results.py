@@ -926,9 +926,11 @@ def render_tab6():
     has_dep2 = bool(st.session_state.get("model_fitted_2") and st.session_state.get("model_results_2"))
     pcb_key = "per_channel_bounds"
     if has_dep2:
+        is_chained = config.get("dependent_relationship") == "chained"
+        dep2_suffix = " (fitted independently, feeds Dependent 1)" if is_chained else " (joint bivariate fit)"
         dep_choice = st.radio(
             "📊 Viewing results for:",
-            [f"Dependent 1 · {config['target']}", f"Dependent 2 · {config.get('target2')} (joint bivariate fit)"],
+            [f"Dependent 1 · {config['target']}", f"Dependent 2 · {config.get('target2')}{dep2_suffix}"],
             horizontal=True, key="tab6_dep_choice",
         )
         if dep_choice.startswith("Dependent 2"):
@@ -946,6 +948,22 @@ def render_tab6():
                 f"φ₂ (Dep1→Dep2 intercept) = **{res['phi2']:.3f}** · "
                 f"joint log-likelihood = **{res['joint_loglik']:.2f}**"
             )
+        elif is_chained:
+            driver_col = st.session_state.model_results.get("chain_driver_col")
+            if dep_choice.startswith("Dependent 1") and driver_col:
+                st.caption(
+                    f"➡️ Chained mode — this fit includes `{driver_col}` "
+                    f"({'smoothed fitted values' if st.session_state.model_results.get('chain_use_fitted') else 'raw actual values'} "
+                    f"of `{config.get('target2')}`) as a "
+                    f"**{st.session_state.model_results.get('chain_driver_role','non_media').replace('_',' ')}** "
+                    f"predictor — look for it in the contribution/ROI/parameter tables below "
+                    f"just like any other channel."
+                )
+            elif driver_col:
+                st.caption(
+                    f"➡️ Chained mode — this model was fitted independently, then its fitted "
+                    f"values feed into Dependent 1 as `{driver_col}`."
+                )
         st.divider()
     else:
         res    = st.session_state.model_results

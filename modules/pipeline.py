@@ -585,3 +585,132 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
         res["P_smooth"] = P_smooth_joint  # joint covariance (block layout: dim1 then dim2)
 
     return results_1, results_2
+
+
+# ── Chained / sequential pipeline — Dependent 2 feeds Dependent 1 as x_t ────
+
+def run_chained_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None):
+    """
+    Chained (mediation-style) two-stage fit, as an alternative to the joint
+    bivariate fit above.
+
+    Stage 1 — Dependent 2 (config["target2"]) is fitted completely on its
+    own, exactly like a single-dependent RBE model: its own predictors, own
+    adstock/saturation, own equation, own optimizer run
+    (run_full_ekf_pipeline). It is a genuine KPI fit with its own
+    contributions / ROI / parameter tables.
+
+    Stage 2 — Dependent 2's resulting SMOOTHED trajectory
+    (config["chain_use_fitted"] = True, the default) — or, if
+    config["chain_use_fitted"] is False, its raw actual column as-is — is
+    added to the dataset as one new predictor and handed to Dependent 1
+    (config["target"])'s own equation, in the role given by
+    config["chain_driver_role"] ("media": gets its own adstock + saturation
+    curve like a channel; "non_media": a direct beta, no adstock/saturation,
+    like an organic control). Dependent 1 is then fitted on its own too
+    (a second, separate run_full_ekf_pipeline call) — so Dependent 2 ends up
+    being BOTH a KPI in its own right AND an x-variable driving Dependent 1.
+
+    This differs from run_multi_dependent_pipeline (joint mode): there the
+    two equations share a single estimation step and only influence each
+    other through a correlated-error / cross-intercept term. Here they are
+    two fully separate optimizer calls, run strictly in sequence, connected
+    only through the one new predictor column.
+
+    Returns
+    -------
+    (results_1, results_2, df_with_driver, driver_col)
+        results_2 : Dependent 2's own standalone fit (same shape as
+            run_full_ekf_pipeline's return).
+        results_1 : Dependent 1's fit, run on `df_with_driver` and carrying
+            two extra keys: "chain_driver_col" (the new predictor's name)
+            and "chain_use_fitted".
+        df_with_driver : df_full plus the new driver column (or df_full
+            unchanged if chain_use_fitted is False, since the raw target2
+            column is already present).
+        driver_col : name of the new predictor column fed into Dependent 1
+            (None if no second dependent variable is configured at all).
+    """
+    target2 = config.get("target2")
+    if not (config.get("enable_second_dependent") and target2):
+        results_1 = run_full_ekf_pipeline(df_full, config, max_iter, method, ng_cfg=ng_cfg)
+        return results_1, None, df_full, None
+
+    # ── Stage 1: fit Dependent 2 completely on its own ───────────────────
+    config_2 = dict(config)
+    config_2["target"]                  = target2
+    config_2["enable_second_dependent"] = False
+    config_2["target2"]                 = None
+    config_2["media"]           = config.get("media_2")           or config["media"]
+    config_2["non_media"]       = config.get("non_media_2", config["non_media"])
+    config_2["comp_media"]      = config.get("comp_media_2", config["comp_media"])
+    config_2["comp_nonmedia"]   = config.get("comp_nonmedia_2", config["comp_nonmedia"])
+    config_2["price"]           = config.get("price_2", config["price"])
+    config_2["use_price"]       = config.get("use_price_2", config["use_price"])
+    config_2["cross_media_map"] = config.get("cross_media_map_2", config["cross_media_map"])
+    config_2["positive_beta_cols"] = config.get("positive_beta_cols_2", config["positive_beta_cols"])
+    config_2["negative_beta_cols"] = config.get("negative_beta_cols_2", config["negative_beta_cols"])
+    config_2["initial_media_betas"]         = {c: 0.0     for c in config_2["media"]}
+    config_2["initial_comp_betas"]          = {c: -0.0001 for c in config_2["comp_media"]}
+    config_2["initial_own_nonmedia_betas"]  = {c: 0.0     for c in config_2["non_media"]}
+    config_2["initial_comp_nonmedia_betas"] = {c: -0.01   for c in config_2["comp_nonmedia"]}
+    config_2["initial_price_beta"]          = {c: -0.1    for c in config_2["price"]}
+    ie2 = config.get("intercept_effectors_2")
+    if ie2 is not None:
+        config_2["intercept_effectors"] = ie2
+    pcb_2 = config.get("per_channel_bounds_2")
+    if pcb_2:
+        config_2["per_channel_bounds"] = pcb_2
+
+    results_2 = run_full_ekf_pipeline(df_full, config_2, max_iter, method, ng_cfg=ng_cfg)
+
+    # ── Stage 2: inject Dependent 2's output as an x-driver, fit Dep 1 ───
+    use_fitted  = config.get("chain_use_fitted", True)
+    driver_role = config.get("chain_driver_role", "non_media")   # "media" | "non_media"
+    force_positive = config.get("chain_driver_positive", True)
+
+    if use_fitted:
+        driver_col = f"{target2}__fitted_driver"
+        df_with_driver = df_full.copy()
+        df_with_driver[driver_col] = results_2["yhat_smooth"]
+    else:
+        driver_col = target2
+        df_with_driver = df_full
+
+    config_1 = dict(config)
+    config_1["enable_second_dependent"] = False
+    config_1["target2"] = None
+
+    if driver_role == "media":
+        config_1["media"] = list(config["media"])
+        if driver_col not in config_1["media"]:
+            config_1["media"] = config_1["media"] + [driver_col]
+        config_1["initial_media_betas"] = dict(config.get("initial_media_betas", {}))
+        config_1["initial_media_betas"].setdefault(driver_col, 0.0)
+    else:
+        config_1["non_media"] = list(config["non_media"])
+        if driver_col not in config_1["non_media"]:
+            config_1["non_media"] = config_1["non_media"] + [driver_col]
+        config_1["initial_own_nonmedia_betas"] = dict(config.get("initial_own_nonmedia_betas", {}))
+        config_1["initial_own_nonmedia_betas"].setdefault(driver_col, 0.0)
+
+    if force_positive:
+        config_1["positive_beta_cols"] = list(config.get("positive_beta_cols", []))
+        if driver_col not in config_1["positive_beta_cols"]:
+            config_1["positive_beta_cols"].append(driver_col)
+        config_1["negative_beta_cols"] = [
+            c for c in config.get("negative_beta_cols", []) if c != driver_col
+        ]
+
+    adstock_map = dict(config.get("adstock_map", {}))
+    adstock_map.setdefault(driver_col, "instant")
+    config_1["adstock_map"] = adstock_map
+
+    results_1 = run_full_ekf_pipeline(df_with_driver, config_1, max_iter, method, ng_cfg=ng_cfg)
+    results_1["chained_from_dep2"] = True
+    results_1["chain_driver_col"]  = driver_col
+    results_1["chain_use_fitted"]  = use_fitted
+    results_1["chain_driver_role"] = driver_role
+    results_2["chained_into_dep1"] = True
+
+    return results_1, results_2, df_with_driver, driver_col

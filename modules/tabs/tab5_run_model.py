@@ -6,7 +6,7 @@ and kicking off the full pipeline.
 import streamlit as st
 
 from modules.ui_helpers import section, info, ng_info, prophet_info, need_data, need_config
-from modules.pipeline import run_multi_dependent_pipeline
+from modules.pipeline import run_multi_dependent_pipeline, run_chained_dependent_pipeline
 
 
 def render_tab5(nevergrad_available: bool):
@@ -69,14 +69,25 @@ def render_tab5(nevergrad_available: bool):
         )
         st.stop()
 
+    dep_relationship = config.get("dependent_relationship", "joint")
     if config.get("enable_second_dependent") and config.get("target2"):
-        st.info(
-            f"➕ **Joint (bivariate) mode**: Dependent 1 (`{config['target']}`) and "
-            f"Dependent 2 (`{config['target2']}`) will be fitted **together** in a "
-            f"single bivariate Kalman filter — one optimizer run over both equations' "
-            f"parameters plus the correlation (ρ) between their errors, rather than "
-            f"two separate independent fits."
-        )
+        if dep_relationship == "chained":
+            st.info(
+                f"➡️ **Chained mode**: Dependent 2 (`{config['target2']}`) will be fitted "
+                f"**on its own first**, then its "
+                f"{'fitted' if config.get('chain_use_fitted', True) else 'raw actual'} values "
+                f"will be added as a new **{config.get('chain_driver_role','non_media').replace('_',' ')}** "
+                f"predictor driving Dependent 1 (`{config['target']}`) — two separate optimizer "
+                f"runs, connected only through that one new column."
+            )
+        else:
+            st.info(
+                f"➕ **Joint (bivariate) mode**: Dependent 1 (`{config['target']}`) and "
+                f"Dependent 2 (`{config['target2']}`) will be fitted **together** in a "
+                f"single bivariate Kalman filter — one optimizer run over both equations' "
+                f"parameters plus the correlation (ρ) between their errors, rather than "
+                f"two separate independent fits."
+            )
         if config.get("different_predictors_2"):
             st.caption(
                 f"🔀 Dependent 2 uses its own predictor set: "
@@ -119,13 +130,50 @@ def render_tab5(nevergrad_available: bool):
         with col1: max_iter = st.number_input("Max iterations", 100, 5000, 800, 100)
 
     if st.button("🚀 Run RBE MMM", type="primary", use_container_width=True):
-        joint_mode = bool(config.get("enable_second_dependent") and config.get("target2"))
-        spinner_text = ("Running joint bivariate RBE optimisation… (60–600 s)"
-                         if joint_mode else "Running RBE optimisation… (30–300 s)")
+        joint_active = bool(config.get("enable_second_dependent") and config.get("target2"))
+        chained_mode = joint_active and dep_relationship == "chained"
+        spinner_text = (
+            "Running chained two-stage RBE optimisation… (60–600 s)" if chained_mode else
+            "Running joint bivariate RBE optimisation… (60–600 s)" if joint_active else
+            "Running RBE optimisation… (30–300 s)"
+        )
         with st.spinner(spinner_text):
             try:
-                results_1, results_2 = run_multi_dependent_pipeline(
-                    df, config, max_iter, method, ng_cfg=ng_cfg)
+                if chained_mode:
+                    results_1, results_2, df_with_driver, driver_col = \
+                        run_chained_dependent_pipeline(df, config, max_iter, method, ng_cfg=ng_cfg)
+                    # Persist the new driver column into the working dataset — same
+                    # pattern Tab 2 uses for prophet columns — so every downstream
+                    # tab (Results, Refine & Refit, exports) sees it automatically.
+                    if driver_col is not None and driver_col not in df.columns:
+                        st.session_state.df = df_with_driver
+                        existing = set(st.session_state.get("chain_driver_cols_added", []))
+                        existing.add(driver_col)
+                        st.session_state.chain_driver_cols_added = sorted(existing)
+                    # Also fold the driver into the SAVED config's Dependent-1
+                    # predictor lists — otherwise Tab 8 · Refine & Refit (which
+                    # deep-copies st.session_state.config, not results_1["g"])
+                    # would silently lose this predictor on the next refit.
+                    if driver_col is not None:
+                        role_key = "media" if results_1.get("chain_driver_role") == "media" else "non_media"
+                        new_config = dict(st.session_state.config)
+                        role_list = list(new_config.get(role_key, []))
+                        if driver_col not in role_list:
+                            role_list.append(driver_col)
+                        new_config[role_key] = role_list
+                        if config.get("chain_driver_positive", True):
+                            pos_list = list(new_config.get("positive_beta_cols", []))
+                            if driver_col not in pos_list:
+                                pos_list.append(driver_col)
+                            new_config["positive_beta_cols"] = pos_list
+                        adstock_map = dict(new_config.get("adstock_map", {}))
+                        adstock_map.setdefault(driver_col, "instant")
+                        new_config["adstock_map"] = adstock_map
+                        st.session_state.config = new_config
+                        config = new_config
+                else:
+                    results_1, results_2 = run_multi_dependent_pipeline(
+                        df, config, max_iter, method, ng_cfg=ng_cfg)
                 st.session_state.model_results   = results_1
                 st.session_state.model_fitted    = True
                 st.session_state.model_results_2 = results_2
@@ -139,7 +187,22 @@ def render_tab5(nevergrad_available: bool):
                 c3.metric("Log-Lik",   f"{results_1['loglik']:.1f}")
                 c4.metric("Converged", "Yes ✅" if results_1["success"] else "Partial ⚠️")
 
-                if results_2 is not None:
+                if results_2 is not None and chained_mode:
+                    st.markdown(f"#### Dependent 2 · `{config.get('target2')}` (fitted independently)")
+                    d1, d2, d3, d4 = st.columns(4)
+                    d1.metric("MAPE",      f"{results_2['mape']:.2%}")
+                    d2.metric("R²",        f"{results_2['r2']:.4f}")
+                    d3.metric("Log-Lik",   f"{results_2['loglik']:.1f}")
+                    d4.metric("Converged", "Yes ✅" if results_2["success"] else "Partial ⚠️")
+                    st.info(
+                        f"➡️ **Chained into Dependent 1**: `{results_1['chain_driver_col']}` "
+                        f"({'fitted' if results_1['chain_use_fitted'] else 'raw actual'} values of "
+                        f"`{config.get('target2')}`) was added as a "
+                        f"**{results_1['chain_driver_role'].replace('_',' ')}** predictor in "
+                        f"Dependent 1's equation — see its beta/contribution/ROI in Tab 6 "
+                        f"alongside the other channels."
+                    )
+                elif results_2 is not None:
                     st.markdown(f"#### Dependent 2 · `{config.get('target2')}` (joint bivariate fit)")
                     d1, d2, d3, d4 = st.columns(4)
                     d1.metric("MAPE",      f"{results_2['mape']:.2%}")
@@ -165,7 +228,8 @@ def render_tab5(nevergrad_available: bool):
 
         if st.session_state.get("model_fitted_2") and st.session_state.get("model_results_2"):
             res2 = st.session_state.model_results_2
-            st.markdown(f"**Dependent 2 · `{config.get('target2')}`** (joint bivariate fit)")
+            mode_label = "fitted independently" if res2.get("chained_into_dep1") else "joint bivariate fit"
+            st.markdown(f"**Dependent 2 · `{config.get('target2')}`** ({mode_label})")
             e1, e2, e3 = st.columns(3)
             e1.metric("MAPE", f"{res2['mape']:.2%}")
             e2.metric("R²",   f"{res2['r2']:.4f}")
@@ -174,6 +238,11 @@ def render_tab5(nevergrad_available: bool):
                 st.caption(f"ρ(Dep1, Dep2) = {res2['rho_y']:.3f} · "
                            f"φ₁ (Dep2→Dep1) = {res2['phi1']:.3f} · φ₂ (Dep1→Dep2) = {res2['phi2']:.3f} · "
                            f"joint log-lik = {res2['joint_loglik']:.2f}")
+            elif res2.get("chained_into_dep1") and st.session_state.model_results.get("chain_driver_col"):
+                st.caption(
+                    f"➡️ Feeds Dependent 1 as `{st.session_state.model_results['chain_driver_col']}` "
+                    f"({st.session_state.model_results.get('chain_driver_role','non_media').replace('_',' ')} role)."
+                )
 
         st.caption("Proceed to **Tab 7** for full results. Use the selector there to "
                    "switch between Dependent 1 and Dependent 2.")
