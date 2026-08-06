@@ -13,6 +13,7 @@ from modules.ui_helpers import (
     weibull_placeholder, need_data, safe_multiselect,
 )
 from modules.bounds_ui import render_per_channel_bounds
+from modules.spike_dummies import build_spike_dummy_columns, drop_columns_if_present
 
 
 def render_tab4():
@@ -116,6 +117,103 @@ def render_tab4():
                 "dependent variable (everything is already used as a predictor)."
             )
             enable_second_dependent = False
+
+    # ── A2b. Automatic Spike / Outlier Dummies (optional) ──────────────
+    st.markdown("### A2b · Automatic Spike / Outlier Dummies (optional)")
+    info(
+        "Auto-flag unusually large, short-lived spikes in the dependent "
+        "variable(s) and give each one its own single-period impulse dummy "
+        "(1 at that observation, 0 elsewhere), so the model can absorb them "
+        "instead of forcing the media betas to explain them. Say what "
+        "<b>percentage of observations</b> to flag — e.g. 10% of 100 rows "
+        "flags the 10 most unusual observations, one dummy each — rather "
+        "than hand-picking individual dates."
+    )
+    enable_spike_dummies = st.checkbox(
+        "➕ Auto-detect spike/outlier dummies", key="cfg_enable_spike_dummies",
+    )
+    spike_dummy_cols_1 = []
+    spike_dummy_cols_2 = []
+    if enable_spike_dummies:
+        sd1, sd2 = st.columns(2)
+        with sd1:
+            spike_dummy_pct = st.number_input(
+                f"Percentage of `{target}`'s observations to flag as spikes (%)",
+                min_value=0.0, max_value=50.0, value=5.0, step=0.5,
+                key="cfg_spike_dummy_pct",
+                help=(
+                    "Rounded to the nearest whole observation — e.g. 10% of "
+                    "100 rows = 10 dummies. Detection is relative to a local "
+                    "(rolling-median) baseline, not the series' overall mean, "
+                    "so a real trend/seasonal swing isn't itself flagged."
+                ),
+            )
+        spike_dummy_pct_2 = 0.0
+        apply_spike_dep2 = False
+        if enable_second_dependent and target2:
+            with sd2:
+                apply_spike_dep2 = st.checkbox(
+                    f"Also flag spikes in `{target2}` (Dependent 2)",
+                    value=True, key="cfg_spike_dummy_apply_dep2",
+                )
+            if apply_spike_dep2:
+                spike_dummy_pct_2 = st.number_input(
+                    f"Percentage of `{target2}`'s observations to flag as spikes (%)",
+                    min_value=0.0, max_value=50.0, value=5.0, step=0.5,
+                    key="cfg_spike_dummy_pct_2",
+                )
+
+        # Clear out any dummy columns generated on a PREVIOUS run (different
+        # percentage / different target) before regenerating, so re-running
+        # detection or tweaking the percentage doesn't leave stale impulse
+        # columns accumulating in the working dataset across Streamlit reruns.
+        drop_columns_if_present(df, st.session_state.get("_spike_dummy_cols_generated", []))
+
+        _date_col_guess = next(
+            (c for c in df.columns if "date" in c.lower() or "week" in c.lower()
+             or "period" in c.lower()), None
+        )
+
+        new_cols_1, flagged_1 = build_spike_dummy_columns(
+            df, target, spike_dummy_pct, date_col=_date_col_guess,
+        )
+        new_cols_2, flagged_2 = [], []
+        if apply_spike_dep2:
+            new_cols_2, flagged_2 = build_spike_dummy_columns(
+                df, target2, spike_dummy_pct_2, existing_cols=new_cols_1,
+                date_col=_date_col_guess,
+            )
+
+        spike_dummy_cols_1, spike_dummy_cols_2 = new_cols_1, new_cols_2
+        spike_dummy_cols_all = new_cols_1 + new_cols_2
+        st.session_state["_spike_dummy_cols_generated"] = spike_dummy_cols_all
+        st.session_state.df = df  # persist the newly-added columns
+
+        if spike_dummy_cols_all:
+            st.success(
+                f"✅ {len(new_cols_1)} spike dummy(s) added for `{target}`"
+                + (f" · {len(new_cols_2)} spike dummy(s) added for `{target2}`"
+                   if apply_spike_dep2 else "")
+                + f" — {len(spike_dummy_cols_all)} total. Each is a single-period "
+                "impulse column with its own automatically-fitted beta "
+                "(no extra optimizer parameters needed)."
+            )
+            with st.expander(f"🔍 View {len(spike_dummy_cols_all)} flagged observation(s)"):
+                preview_df = pd.DataFrame(flagged_1 + flagged_2)
+                if not preview_df.empty:
+                    preview_df = preview_df.rename(columns={
+                        "row": "Row #", "label": "Date/Label",
+                        "value": "Value", "column": "Dummy column",
+                    })
+                    st.dataframe(preview_df, use_container_width=True, hide_index=True)
+        else:
+            st.caption("No spikes flagged at the current percentage (0%).")
+    else:
+        # Nothing enabled this run — make sure any dummy columns left over
+        # from a previous run (e.g. user unchecked the box) are removed too.
+        drop_columns_if_present(df, st.session_state.get("_spike_dummy_cols_generated", []))
+        st.session_state["_spike_dummy_cols_generated"] = []
+        st.session_state.df = df
 
     # ── A1b. Relationship between Dependent 1 and Dependent 2 ──────────
     dependent_relationship = "joint"
@@ -826,7 +924,8 @@ def render_tab4():
                 "price": price_vars if use_price else [],
                 "comp_media": comp_media,
                 "comp_nonmedia": comp_nonmedia,
-                "dummy_cols": [],
+                "dummy_cols": spike_dummy_cols_1,
+                "dummy_cols_2": spike_dummy_cols_2,
                 "intercept_effectors": intercept_effectors,
                 "intercept_effectors_2": intercept_effectors_2,
                 "cross_media_map": cross_map,

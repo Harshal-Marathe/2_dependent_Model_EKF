@@ -443,6 +443,15 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     config_2["cross_media_map"] = config.get("cross_media_map_2", config["cross_media_map"])
     config_2["positive_beta_cols"] = config.get("positive_beta_cols_2", config["positive_beta_cols"])
     config_2["negative_beta_cols"] = config.get("negative_beta_cols_2", config["negative_beta_cols"])
+    # Spike/outlier impulse dummies (see modules/spike_dummies.py /
+    # Tab 5 · Section A2b): each dependent gets its OWN dummy columns by
+    # default (dummy_cols_2, generated against target2's own series) — NOT
+    # config_1's dummy_cols, which would otherwise put Dependent 1's spike
+    # dummies into Dependent 2's equation too (harmless — an irrelevant
+    # dummy just settles near a ~0 beta — but pointless extra state
+    # dimensions). Falls back to sharing config["dummy_cols"] only for
+    # older saved configs that predate "dummy_cols_2" entirely.
+    config_2["dummy_cols"] = config.get("dummy_cols_2", config.get("dummy_cols", []))
     # Re-derive Dep 2's own initial-beta defaults against ITS OWN (possibly
     # different) channel lists rather than reusing Dep 1's, which may not
     # even contain the same columns.
@@ -679,6 +688,9 @@ def run_chained_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=Non
     config_2["cross_media_map"] = config.get("cross_media_map_2", config["cross_media_map"])
     config_2["positive_beta_cols"] = config.get("positive_beta_cols_2", config["positive_beta_cols"])
     config_2["negative_beta_cols"] = config.get("negative_beta_cols_2", config["negative_beta_cols"])
+    # See the identical note in run_multi_dependent_pipeline above — Dep 2
+    # gets its own spike/outlier dummies by default, not Dep 1's.
+    config_2["dummy_cols"] = config.get("dummy_cols_2", config.get("dummy_cols", []))
     config_2["initial_media_betas"]         = {c: 0.0     for c in config_2["media"]}
     config_2["initial_comp_betas"]          = {c: -0.0001 for c in config_2["comp_media"]}
     config_2["initial_own_nonmedia_betas"]  = {c: 0.0     for c in config_2["non_media"]}
