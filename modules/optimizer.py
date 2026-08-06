@@ -134,18 +134,31 @@ def _composite_loss_joint(theta_joint, df_train, g1, g2, n1, n2,
 
     The trailing phi_1/phi_2 pair is OMITTED entirely (theta_joint ends
     right after rho) when the model is configured with "simple" (no
-    carryover) intercept dynamics — cross-intercept coupling is itself a
-    carryover mechanism, so it doesn't apply there. Detected here from
-    theta_joint's actual length rather than a separate flag, so this stays
-    correct regardless of which caller (scipy or Nevergrad) built it.
+    carryover) intercept dynamics, OR when g1["CROSS_INTERCEPT_COUPLING_MODE"]
+    is "none" — cross-intercept coupling is itself a carryover mechanism,
+    so it doesn't apply there. Detected here from theta_joint's actual
+    length rather than a separate flag, so this stays correct regardless
+    of which caller (scipy or Nevergrad) built it.
+
+    When the pair IS present, g1["CROSS_INTERCEPT_COUPLING_MODE"] (shared
+    with g2 — see modules/pipeline.py) further decides whether ONE of the
+    two directions is masked back to exactly 0.0 even though its theta
+    slot exists (kept for a stable, fixed-width theta_joint layout — see
+    modules/pipeline.py::run_multi_dependent_pipeline):
+      "both"          -> phi_1 and phi_2 both free
+      "dep1_in_dep2"  -> only phi_2 free (phi_1 forced to 0)
+      "dep2_in_dep1"  -> only phi_1 free (phi_2 forced to 0)
     """
     try:
         theta1 = theta_joint[:n1]
         theta2 = theta_joint[n1:n1+n2]
         rho    = theta_joint[n1+n2]
         if len(theta_joint) - (n1 + n2) >= 3:
-            phi1 = theta_joint[n1+n2+1]
-            phi2 = theta_joint[n1+n2+2]
+            coupling_mode = g1.get("CROSS_INTERCEPT_COUPLING_MODE", "both")
+            allow_phi1 = coupling_mode in ("both", "dep2_in_dep1")
+            allow_phi2 = coupling_mode in ("both", "dep1_in_dep2")
+            phi1 = theta_joint[n1+n2+1] if allow_phi1 else 0.0
+            phi2 = theta_joint[n1+n2+2] if allow_phi2 else 0.0
         else:
             phi1 = phi2 = 0.0
         p1 = unpack_theta(theta1, g1)

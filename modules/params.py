@@ -83,6 +83,28 @@ def _make_globals(cfg: dict):
     # modules/pipeline.py::run_multi_dependent_pipeline.
     g["INTERCEPT_DYNAMICS_TYPE"] = cfg.get("intercept_dynamics_type", "carryover")  # "carryover" | "simple"
 
+    # CROSS_INTERCEPT_COUPLING_MODE: only relevant for the 2-dependent JOINT
+    # (bivariate) fit, and only when INTERCEPT_DYNAMICS_TYPE is "carryover"
+    # on both equations (the coupling is itself a carryover mechanism — see
+    # modules/kalman.py module docstring's "Cross-intercept coupling"
+    # section). Controls which of the two off-diagonal phi_1/phi_2 terms
+    # are actually estimated (the other is pinned at exactly 0):
+    #   "both"          — phi_1 AND phi_2 both estimated (original,
+    #                      backward-compatible default: full bidirectional
+    #                      coupling).
+    #   "dep1_in_dep2"  — one-directional: Dependent 1's previous intercept
+    #                      feeds Dependent 2's equation (phi_2 estimated,
+    #                      phi_1 forced to 0).
+    #   "dep2_in_dep1"  — one-directional: Dependent 2's previous intercept
+    #                      feeds Dependent 1's equation (phi_1 estimated,
+    #                      phi_2 forced to 0).
+    #   "none"          — cross-intercept coupling switched off entirely
+    #                      (phi_1 = phi_2 = 0, no theta slots at all — same
+    #                      as "simple" intercept dynamics in this respect).
+    # See modules/pipeline.py::run_joint_dependent_pipeline and
+    # modules/optimizer.py::_composite_loss_joint for where this is applied.
+    g["CROSS_INTERCEPT_COUPLING_MODE"] = cfg.get("cross_intercept_coupling_mode", "both")
+
     g["POSITIVE_BETA_COLS"]  = cfg.get("positive_beta_cols", [])
     g["NEGATIVE_BETA_COLS"]  = cfg.get("negative_beta_cols", [])
     g["PER_CHANNEL_BOUNDS"]  = cfg.get("per_channel_bounds", {})

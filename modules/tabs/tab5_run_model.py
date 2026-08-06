@@ -209,10 +209,17 @@ def render_tab5(nevergrad_available: bool):
                     d2.metric("R²",        f"{results_2['r2']:.4f}")
                     d3.metric("Log-Lik",   f"{results_2['loglik']:.1f}")
                     d4.metric("Converged", "Yes ✅" if results_2["success"] else "Partial ⚠️")
+                    _coupling_mode_2 = results_2.get("cross_intercept_coupling_mode", "both")
+                    _coupling_note_2 = {
+                        "both": "both directions",
+                        "dep1_in_dep2": "one-directional, Dep1→Dep2 only",
+                        "dep2_in_dep1": "one-directional, Dep2→Dep1 only",
+                        "none": "off",
+                    }.get(_coupling_mode_2, _coupling_mode_2)
                     st.info(
                         f"🔗 Joint bivariate log-likelihood: **{results_2['joint_loglik']:.1f}** · "
                         f"estimated error correlation ρ(Dep1, Dep2) = **{results_2['rho_y']:.3f}** · "
-                        f"cross-intercept coupling: φ₁ (Dep2→Dep1) = **{results_2['phi1']:.3f}**, "
+                        f"cross-intercept coupling ({_coupling_note_2}): φ₁ (Dep2→Dep1) = **{results_2['phi1']:.3f}**, "
                         f"φ₂ (Dep1→Dep2) = **{results_2['phi2']:.3f}**"
                     )
             except Exception as e:
@@ -235,8 +242,16 @@ def render_tab5(nevergrad_available: bool):
             e2.metric("R²",   f"{res2['r2']:.4f}")
             e3.metric("Log-Lik", f"{res2['loglik']:.2f}")
             if res2.get("joint_fit"):
+                _coupling_mode_disp = res2.get("cross_intercept_coupling_mode", "both")
+                _coupling_note_disp = {
+                    "both": "both directions",
+                    "dep1_in_dep2": "Dep1→Dep2 only",
+                    "dep2_in_dep1": "Dep2→Dep1 only",
+                    "none": "off",
+                }.get(_coupling_mode_disp, _coupling_mode_disp)
                 st.caption(f"ρ(Dep1, Dep2) = {res2['rho_y']:.3f} · "
-                           f"φ₁ (Dep2→Dep1) = {res2['phi1']:.3f} · φ₂ (Dep1→Dep2) = {res2['phi2']:.3f} · "
+                           f"φ₁ (Dep2→Dep1) = {res2['phi1']:.3f} · φ₂ (Dep1→Dep2) = {res2['phi2']:.3f} "
+                           f"[coupling: {_coupling_note_disp}] · "
                            f"joint log-lik = {res2['joint_loglik']:.2f}")
             elif res2.get("chained_into_dep1") and st.session_state.model_results.get("chain_driver_col"):
                 st.caption(

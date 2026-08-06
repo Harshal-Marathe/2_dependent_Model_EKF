@@ -941,11 +941,19 @@ def render_tab6():
             res = st.session_state.model_results
             target = config["target"]
         if res.get("joint_fit"):
+            _coupling_mode_t6 = res.get("cross_intercept_coupling_mode", "both")
+            _coupling_note_t6 = {
+                "both": "both directions",
+                "dep1_in_dep2": "Dep1→Dep2 only",
+                "dep2_in_dep1": "Dep2→Dep1 only",
+                "none": "off",
+            }.get(_coupling_mode_t6, _coupling_mode_t6)
             st.caption(
                 f"🔗 Jointly fitted with a bivariate Kalman filter · "
                 f"ρ(Dep1, Dep2) = **{res['rho_y']:.3f}** · "
                 f"φ₁ (Dep2→Dep1 intercept) = **{res['phi1']:.3f}** · "
-                f"φ₂ (Dep1→Dep2 intercept) = **{res['phi2']:.3f}** · "
+                f"φ₂ (Dep1→Dep2 intercept) = **{res['phi2']:.3f}** "
+                f"(coupling: {_coupling_note_t6}) · "
                 f"joint log-likelihood = **{res['joint_loglik']:.2f}**"
             )
         elif is_chained:

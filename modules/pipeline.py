@@ -398,6 +398,11 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
          simultaneously, by maximising the bivariate log-likelihood:
              Intercept_1,t = G0_1·Intercept_1,t-1 + phi_1·Intercept_2,t-1 + effectors_1,t
              Intercept_2,t = G0_2·Intercept_2,t-1 + phi_2·Intercept_1,t-1 + effectors_2,t
+         Which of phi_1/phi_2 actually get a free theta slot (vs. being
+         pinned at exactly 0) is controlled by config
+         "cross_intercept_coupling_mode" — "both" (default), "dep1_in_dep2"
+         (phi_2 only), "dep2_in_dep1" (phi_1 only), or "none" (neither).
+         See the CROSS_INTERCEPT_COUPLING_MODE block below.
       2. At every time step, the Kalman gain is computed from the full
          2x2 observation-noise covariance, so a surprising observation in
          one equation also updates the other equation's state estimate
@@ -481,12 +486,35 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     # down) infers which layout it got from len(theta_joint) - (n1+n2)
     # rather than assuming a fixed width, so nothing else needs to branch
     # on this flag.
-    use_cross_intercept_coupling = g1.get("INTERCEPT_DYNAMICS_TYPE", "carryover") != "simple"
+    #
+    # On top of that carryover gate, CROSS_INTERCEPT_COUPLING_MODE (also
+    # shared across g1/g2 — checking g1 is sufficient) picks which
+    # direction(s) of coupling are actually estimated:
+    #   "both"         -> phi_1 and phi_2 both free
+    #   "dep1_in_dep2" -> only phi_2 free (Dep1's previous intercept feeds
+    #                     Dep2's equation); phi_1 pinned to 0
+    #   "dep2_in_dep1" -> only phi_1 free (Dep2's previous intercept feeds
+    #                     Dep1's equation); phi_2 pinned to 0
+    #   "none"         -> same as "simple" intercept dynamics for coupling
+    #                     purposes — no phi theta slots at all
+    coupling_mode = g1.get("CROSS_INTERCEPT_COUPLING_MODE", "both")
+    use_cross_intercept_coupling = (
+        g1.get("INTERCEPT_DYNAMICS_TYPE", "carryover") != "simple"
+        and coupling_mode != "none"
+    )
+    # allow_phi1/allow_phi2 also gate the objective function and the
+    # best-theta extraction below, so a direction that's "pinned to 0" via
+    # bounds is ALSO forced to exactly 0.0 there — belt and suspenders,
+    # since a (0.0, 0.0) bound only constrains the optimizer's search, not
+    # the tiny numerical floor `build_normalized_problem` uses internally.
+    allow_phi1 = coupling_mode in ("both", "dep2_in_dep1")  # Dep2 -> Dep1
+    allow_phi2 = coupling_mode in ("both", "dep1_in_dep2")  # Dep1 -> Dep2
     phi1_0, phi2_0 = 0.0, 0.0
-    phi_bounds = (0.0, None)
+    phi1_bounds = (0.0, None) if allow_phi1 else (0.0, 0.0)
+    phi2_bounds = (0.0, None) if allow_phi2 else (0.0, 0.0)
     if use_cross_intercept_coupling:
         theta0_joint = np.concatenate([theta0_1, theta0_2, [rho0, phi1_0, phi2_0]])
-        bounds_joint = list(bounds1) + list(bounds2) + [rho_bounds, phi_bounds, phi_bounds]
+        bounds_joint = list(bounds1) + list(bounds2) + [rho_bounds, phi1_bounds, phi2_bounds]
     else:
         theta0_joint = np.concatenate([theta0_1, theta0_2, [rho0]])
         bounds_joint = list(bounds1) + list(bounds2) + [rho_bounds]
@@ -523,8 +551,8 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
             theta2 = theta_joint[n1:n1+n2]
             rho    = theta_joint[n1+n2]
             if len(theta_joint) - (n1 + n2) >= 3:
-                phi1 = theta_joint[n1+n2+1]
-                phi2 = theta_joint[n1+n2+2]
+                phi1 = theta_joint[n1+n2+1] if allow_phi1 else 0.0
+                phi2 = theta_joint[n1+n2+2] if allow_phi2 else 0.0
             else:
                 phi1 = phi2 = 0.0
             p1 = unpack_theta(theta1, g1)
@@ -543,8 +571,8 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
     best_theta2 = best_theta_joint[n1:n1+n2]
     best_rho    = float(np.clip(best_theta_joint[n1+n2], -0.995, 0.995))
     if len(best_theta_joint) - (n1 + n2) >= 3:
-        best_phi1 = float(best_theta_joint[n1+n2+1])
-        best_phi2 = float(best_theta_joint[n1+n2+2])
+        best_phi1 = float(best_theta_joint[n1+n2+1]) if allow_phi1 else 0.0
+        best_phi2 = float(best_theta_joint[n1+n2+2]) if allow_phi2 else 0.0
     else:
         best_phi1 = 0.0
         best_phi2 = 0.0
@@ -580,6 +608,7 @@ def run_multi_dependent_pipeline(df_full, config, max_iter, method, ng_cfg=None)
         res["rho_y"] = best_rho
         res["phi1"] = best_phi1  # coefficient of Intercept_Dep2,t-1 in Dep1's intercept eq
         res["phi2"] = best_phi2  # coefficient of Intercept_Dep1,t-1 in Dep2's intercept eq
+        res["cross_intercept_coupling_mode"] = coupling_mode  # "both" | "dep1_in_dep2" | "dep2_in_dep1" | "none"
         res["joint_loglik"] = joint_loglik
         res["joint_fit"] = True
         res["P_smooth"] = P_smooth_joint  # joint covariance (block layout: dim1 then dim2)

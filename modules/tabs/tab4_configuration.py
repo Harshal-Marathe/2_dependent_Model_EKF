@@ -511,6 +511,59 @@ def render_tab4():
         )
         use_simple_intercept = intercept_dynamics_choice.startswith("Without")
 
+    # ── D1. Cross-intercept coupling direction (2-dependent joint fit only) ──
+    # Only meaningful when a second dependent is configured, the two are
+    # linked in "joint" (bivariate Kalman filter) mode, and the intercept is
+    # on "carryover" dynamics — coupling is itself a carryover mechanism (see
+    # modules/kalman.py module docstring), so it's a no-op otherwise.
+    cross_intercept_coupling_mode_str = "both"
+    if enable_second_dependent and target2 and dependent_relationship == "joint":
+        st.markdown("#### Cross-intercept Coupling (Dependent 1 ↔ Dependent 2)")
+        if use_simple_intercept:
+            st.caption(
+                "🚫 Not applicable — Intercept Dynamics above is set to "
+                "**Without carryover**, so there is no previous-period intercept "
+                "for either equation to feed into the other."
+            )
+        else:
+            coupling_options = [
+                "🔗 Both directions (Dep1 ↔ Dep2)",
+                f"➡️ One-directional — {target} → {target2} only",
+                f"⬅️ One-directional — {target2} → {target} only",
+                "🚫 None (equations stay coupled only through the shared error correlation ρ)",
+            ]
+            coupling_choice = st.radio(
+                "Cross-intercept coupling direction",
+                coupling_options,
+                horizontal=False,
+                key="cross_intercept_coupling_mode_radio",
+                help=(
+                    "Each equation's intercept can optionally also depend on the "
+                    "OTHER equation's PREVIOUS-period intercept:\n\n"
+                    "  Intercept_1,t = G0_1·Intercept_1,t-1 + φ_1·Intercept_2,t-1 + effectors_1,t\n"
+                    "  Intercept_2,t = G0_2·Intercept_2,t-1 + φ_2·Intercept_1,t-1 + effectors_2,t\n\n"
+                    "**Both directions**: φ_1 and φ_2 are both freely estimated "
+                    f"(default, original behaviour).\n\n"
+                    f"**{target} → {target2} only**: only φ_2 is estimated — "
+                    f"{target}'s previous intercept feeds {target2}'s equation, "
+                    f"but not the other way round (φ_1 is fixed at 0).\n\n"
+                    f"**{target2} → {target} only**: only φ_1 is estimated — "
+                    f"{target2}'s previous intercept feeds {target}'s equation, "
+                    f"but not the other way round (φ_2 is fixed at 0).\n\n"
+                    "**None**: φ_1 = φ_2 = 0 — the two equations' intercepts "
+                    "evolve fully independently; the fit is still \"joint\" only "
+                    "through the shared/correlated observation error ρ."
+                ),
+            )
+            if coupling_choice.startswith("🔗"):
+                cross_intercept_coupling_mode_str = "both"
+            elif coupling_choice.startswith("➡️"):
+                cross_intercept_coupling_mode_str = "dep1_in_dep2"
+            elif coupling_choice.startswith("⬅️"):
+                cross_intercept_coupling_mode_str = "dep2_in_dep1"
+            else:
+                cross_intercept_coupling_mode_str = "none"
+
     # Summary box showing the active state equation. Adstock is now chosen
     # PER CHANNEL (adstock_map above) — the transform (Hill/Power) is still
     # one global choice for all media betas, so the equation shown here is
@@ -556,6 +609,15 @@ def render_tab4():
         )
     _dynamics_label = "Simple / no carryover" if use_simple_intercept else "With carryover"
     st.markdown(f"**Intercept state ({_dynamics_label}):** {intercept_eq_text}")
+
+    if enable_second_dependent and target2 and dependent_relationship == "joint" and not use_simple_intercept:
+        _coupling_label = {
+            "both": f"🔗 Both directions (φ₁ and φ₂ both estimated)",
+            "dep1_in_dep2": f"➡️ {target} → {target2} only (φ₂ estimated, φ₁ = 0)",
+            "dep2_in_dep1": f"⬅️ {target2} → {target} only (φ₁ estimated, φ₂ = 0)",
+            "none": "🚫 None (φ₁ = φ₂ = 0)",
+        }.get(cross_intercept_coupling_mode_str, cross_intercept_coupling_mode_str)
+        st.caption(f"**Cross-intercept coupling:** {_coupling_label}")
 
     st.divider()
 
@@ -783,6 +845,7 @@ def render_tab4():
                 "transform_type": transform_type_str,
                 "intercept_transform_type": intercept_transform_type_str,
                 "intercept_dynamics_type": intercept_dynamics_type_str,
+                "cross_intercept_coupling_mode": cross_intercept_coupling_mode_str,
                 "adstock_n_lags": int(n_lags),
                 "use_organic": use_organic,
                 "use_price": use_price,
