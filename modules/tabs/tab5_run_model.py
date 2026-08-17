@@ -3,10 +3,64 @@ Tab 6 — Run RBE Model: optimizer selection (L-BFGS-B / SLSQP / Nevergrad)
 and kicking off the full pipeline.
 """
 
+import pandas as pd
 import streamlit as st
 
 from modules.ui_helpers import section, info, ng_info, prophet_info, need_data, need_config
 from modules.pipeline import run_multi_dependent_pipeline, run_chained_dependent_pipeline
+from modules.params import _make_globals
+from modules.kalman import describe_process_noise
+
+
+def _render_initial_q_panel(df, config):
+    """
+    Live preview of the initial Q (process-noise) matrix — computed
+    straight from the current config + training data, with no need to
+    actually run the model first (Q depends only on df/g, never on the
+    fitted parameters). Shown per equation: Dependent 1 always, Dependent
+    2 as well when a second dependent variable is configured.
+    """
+    with st.expander("🔎 Initial Q matrix (process noise) — preview", expanded=False):
+        st.caption(
+            "Diagonal entries only: `Q[i,i] = std_dev(variable_i) × 0.01` "
+            "(intercept uses the dependent variable's own std dev; every "
+            "other state uses its own driving column's std dev). "
+            "Seasonal states have no single driving column and stay at a "
+            "small fixed default."
+        )
+        n_train = config.get("n_train", len(df))
+        df_train = df.iloc[:n_train]
+
+        g1 = _make_globals(config)
+        rows1 = describe_process_noise(df_train, g1)
+        st.markdown(f"**Dependent 1 · `{config['target']}`**")
+        st.dataframe(
+            pd.DataFrame(rows1).style.format({"Std Dev": "{:.4g}", "Q[i,i]": "{:.6g}"}),
+            use_container_width=True, hide_index=True,
+        )
+
+        if config.get("enable_second_dependent") and config.get("target2"):
+            config_2 = dict(config)
+            config_2["target"]        = config["target2"]
+            config_2["media"]         = config.get("media_2") or config["media"]
+            config_2["non_media"]     = config.get("non_media_2", config.get("non_media", []))
+            config_2["comp_media"]    = config.get("comp_media_2", config.get("comp_media", []))
+            config_2["comp_nonmedia"] = config.get("comp_nonmedia_2", config.get("comp_nonmedia", []))
+            config_2["price"]         = config.get("price_2", config.get("price", []))
+            config_2["use_price"]     = config.get("use_price_2", config.get("use_price", False))
+            config_2["cross_media_map"] = config.get("cross_media_map_2", config.get("cross_media_map", {}))
+            config_2["dummy_cols"]    = config.get("dummy_cols_2", config.get("dummy_cols", []))
+            ie2 = config.get("intercept_effectors_2")
+            if ie2 is not None:
+                config_2["intercept_effectors"] = ie2
+
+            g2 = _make_globals(config_2)
+            rows2 = describe_process_noise(df_train, g2)
+            st.markdown(f"**Dependent 2 · `{config['target2']}`**")
+            st.dataframe(
+                pd.DataFrame(rows2).style.format({"Std Dev": "{:.4g}", "Q[i,i]": "{:.6g}"}),
+                use_container_width=True, hide_index=True,
+            )
 
 
 def render_tab5(nevergrad_available: bool):
@@ -95,6 +149,9 @@ def render_tab5(nevergrad_available: bool):
                 f"{len(config.get('price_2', []))} price · {len(config.get('comp_media_2', []))} comp-media · "
                 f"{len(config.get('comp_nonmedia_2', []))} comp-non-media."
             )
+
+    st.divider()
+    _render_initial_q_panel(df, config)
 
     st.divider()
     st.markdown("### Optimizer Selection")

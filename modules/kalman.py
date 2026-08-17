@@ -255,68 +255,105 @@ def _build_transition_matrix(g, params):
 # ── Process noise ────────────────────────────────────────────────────────────
 
 def _build_process_noise(df, g):
+    """
+    Diagonal process-noise matrix. Every state's entry is set directly as
+    (std_dev(its own driving column) * STD_NOISE_FRACTION) — a fixed
+    fraction (default 1%) of that variable's own standard deviation in
+    the data, used AS the Q entry itself (no squaring):
+
+        Q[i, i] = std(col_i) * STD_NOISE_FRACTION
+
+    - Intercept  -> std dev of the TARGET column (sales / dependent var).
+    - Each beta state (media, comp-media, own-non-media, comp-non-media,
+      price, dummy) -> std dev of that state's own driving column.
+    - Seasonal states have no single driving column (they come from the
+      Fourier/seasonal basis baked into the observation matrix, not a raw
+      df column), so they keep the small legacy default noise.
+    """
     N_MEDIA = g["N_MEDIA"]; N_COMP = g["N_COMP"]
     N_OWN_NONMEDIA = g["N_OWN_NONMEDIA"]; N_COMP_NONMEDIA = g["N_COMP_NONMEDIA"]
     N_PRICE = g["N_PRICE"]; N_DUMMIES = g["N_DUMMIES"]; SEASONAL_DIM = g["SEASONAL_DIM"]
     dim = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + N_COMP_NONMEDIA + N_PRICE + N_DUMMIES + SEASONAL_DIM
     Q = np.eye(dim) * 1e-6
-    target_mean = float(df[g["TARGET_COL"]].mean())
 
-    # Intercept process noise: previously a flat 1e-4 regardless of the
-    # target's actual scale/units, which made it negligible for most
-    # business data and left the intercept almost frozen wherever its very
-    # first (loosely-constrained) update landed — including negative.
-    # Scaling it off the target's own mean gives the intercept genuine,
-    # data-scale-appropriate period-to-period flexibility so it can drift
-    # back toward a sensible level instead of getting stuck.
-    intercept_noise_scale = float(g.get("INTERCEPT_NOISE_SCALE", 0.0))
-    if intercept_noise_scale > 0 and target_mean > 0:
-        Q[0, 0] = (intercept_noise_scale * target_mean) ** 2
-    else:
-        Q[0, 0] = 1e-6  # legacy fallback (effectively frozen)
+    # Fraction of a column's own std dev used as that state's process-noise
+    # std dev. Defaults to 0.01 (1%) per the std_dev(variable) * 0.01 rule;
+    # override via config "STD_NOISE_FRACTION" if ever needed.
+    std_noise_fraction = float(g.get("STD_NOISE_FRACTION", 0.01))
 
-    # Beta states (media / comp-media / non-media / comp-non-media / price):
-    # each beta evolves as β_t = Ls·β_{t-1} + δ·trigger_t. With a flat,
-    # unit-free 1e-6 process noise the filter treated that as almost
-    # perfectly deterministic — no real ability to wiggle back up on its
-    # own. Combined with Ls < 1, that guarantees geometric decay toward
-    # zero for EVERY channel whenever its forcing term weakens, regardless
-    # of whether that's actually true of that channel's real-world effect.
-    #
-    # Scale each beta's process noise so a "beta_noise_scale" fraction of
-    # this is honoured consistently across channels of very different
-    # units (spend in thousands vs. a 0/1 flag, say): allow the beta to
-    # wander enough, per period, that — once multiplied by that channel's
-    # own typical magnitude — the resulting contribution could move by
-    # roughly `beta_noise_scale` × the target's average value. This is
-    # the direct beta-level analogue of the intercept treatment above.
-    beta_noise_scale = float(g.get("BETA_NOISE_SCALE", 0.0))
-
-    def _beta_q(col):
-        if beta_noise_scale <= 0 or target_mean <= 0 or col not in df.columns:
+    def _std_q(col):
+        if col not in df.columns:
             return 1e-6  # legacy fallback (effectively frozen)
-        reg_mean = float(np.mean(np.abs(df[col].values)))
-        if reg_mean < 1e-9:
+        col_std = float(np.std(df[col].values.astype(float)))
+        if col_std < 1e-12:
             return 1e-6
-        return (beta_noise_scale * target_mean / reg_mean) ** 2
+        return std_noise_fraction * col_std
+
+    # Intercept: std dev of this equation's own target (sales / 2nd dependent).
+    Q[0, 0] = _std_q(g["TARGET_COL"])
 
     for i, col in enumerate(g["MEDIA_COLS"]):
-        Q[i + 1, i + 1] = _beta_q(col)
+        Q[i + 1, i + 1] = _std_q(col)
     for j, col in enumerate(g["COMP_MEDIA_COLS"]):
-        Q[1 + N_MEDIA + j, 1 + N_MEDIA + j] = _beta_q(col)
+        Q[1 + N_MEDIA + j, 1 + N_MEDIA + j] = _std_q(col)
     for k, col in enumerate(g["OWN_NONMEDIA_COLS"]):
         idx = 1 + N_MEDIA + N_COMP + k
-        Q[idx, idx] = _beta_q(col)
+        Q[idx, idx] = _std_q(col)
     for k, col in enumerate(g["COMP_NONMEDIA_COLS"]):
         idx = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + k
-        Q[idx, idx] = _beta_q(col)
+        Q[idx, idx] = _std_q(col)
     for p, col in enumerate(g["PRICE_COLS"]):
         idx = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + N_COMP_NONMEDIA + p
-        Q[idx, idx] = _beta_q(col)
+        Q[idx, idx] = _std_q(col)
 
-    for d in range(N_DUMMIES):
-        idx = 1+N_MEDIA+N_COMP+N_OWN_NONMEDIA+N_COMP_NONMEDIA+d; Q[idx, idx] = 5e-3
+    for d, col in enumerate(g.get("DUMMY_COLS", [])):
+        idx = 1 + N_MEDIA + N_COMP + N_OWN_NONMEDIA + N_COMP_NONMEDIA + d
+        Q[idx, idx] = _std_q(col)
+
     return Q
+
+
+def describe_process_noise(df, g):
+    """
+    Human-readable breakdown of the initial Q matrix built by
+    _build_process_noise, one row per state: which state it is, which raw
+    column drives it (None for states with no single driving column, e.g.
+    seasonal), that column's std dev, the noise fraction applied, and the
+    resulting Q[i, i] entry (= std_dev * fraction, un-squared).
+
+    Returns a list of dicts, in the same row/column order as the Q matrix
+    itself, ready to hand to a UI table (e.g. pandas.DataFrame(rows)).
+    """
+    N_MEDIA = g["N_MEDIA"]; N_COMP = g["N_COMP"]
+    N_OWN_NONMEDIA = g["N_OWN_NONMEDIA"]; N_COMP_NONMEDIA = g["N_COMP_NONMEDIA"]
+    N_PRICE = g["N_PRICE"]; N_DUMMIES = g["N_DUMMIES"]; SEASONAL_DIM = g["SEASONAL_DIM"]
+    std_noise_fraction = float(g.get("STD_NOISE_FRACTION", 0.01))
+
+    def _row(label, col):
+        if col is not None and col in df.columns:
+            col_std = float(np.std(df[col].values.astype(float)))
+            q_val = std_noise_fraction * col_std if col_std >= 1e-12 else 1e-6
+        else:
+            col_std = None
+            q_val = 1e-6
+        return {"State": label, "Variable": col, "Std Dev": col_std, "Q[i,i]": q_val}
+
+    rows = [_row("Intercept", g["TARGET_COL"])]
+    for col in g["MEDIA_COLS"]:
+        rows.append(_row(f"Media beta — {col}", col))
+    for col in g["COMP_MEDIA_COLS"]:
+        rows.append(_row(f"Comp-media beta — {col}", col))
+    for col in g["OWN_NONMEDIA_COLS"]:
+        rows.append(_row(f"Own non-media beta — {col}", col))
+    for col in g["COMP_NONMEDIA_COLS"]:
+        rows.append(_row(f"Comp non-media beta — {col}", col))
+    for col in g["PRICE_COLS"]:
+        rows.append(_row(f"Price beta — {col}", col))
+    for col in g.get("DUMMY_COLS", []):
+        rows.append(_row(f"Dummy beta — {col}", col))
+    for s in range(SEASONAL_DIM):
+        rows.append(_row(f"Seasonal — component {s+1}", None))
+    return rows
 
 
 # ── Transformation helper ────────────────────────────────────────────────────
