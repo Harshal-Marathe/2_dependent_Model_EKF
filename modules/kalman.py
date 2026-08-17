@@ -273,7 +273,7 @@ def _build_process_noise(df, g):
     if intercept_noise_scale > 0 and target_mean > 0:
         Q[0, 0] = (intercept_noise_scale * target_mean) ** 2
     else:
-        Q[0, 0] = 1e-4  # legacy fallback (effectively frozen)
+        Q[0, 0] = 1e-6  # legacy fallback (effectively frozen)
 
     # Beta states (media / comp-media / non-media / comp-non-media / price):
     # each beta evolves as β_t = Ls·β_{t-1} + δ·trigger_t. With a flat,
