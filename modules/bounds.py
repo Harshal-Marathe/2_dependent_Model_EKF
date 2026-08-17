@@ -38,7 +38,7 @@ def _build_theta0_and_bounds(df, g):
     INTERCEPT_DYNAMICS_TYPE = g.get("INTERCEPT_DYNAMICS_TYPE", "carryover")
 
     # G0 bound (carryover mode)
-    G0_bound = (0.6, 0.9)
+    G0_bound = (0.6, 0.95)
     G0_init  = (G0_bound[0] + G0_bound[1]) / 2  # 0.845 — always valid even if bound changes later
 
     # I0 bound (simple-regression mode) — a baseline level, same order of
